@@ -67,7 +67,8 @@
   #tipsSheet{background:var(--panel);color:var(--ink);width:min(560px,100%);max-height:85vh;overflow:auto;border-radius:16px 16px 0 0;padding:1rem 1.1rem 1.6rem;position:relative}
   @media (min-width:821px){#tips{align-items:center}#tipsSheet{border-radius:16px}}
   #tipsClose{position:sticky;top:0;float:right;background:var(--chip);color:var(--ink);border-radius:999px;width:36px;height:36px;padding:0;font-size:1.1rem}
-  .tipimg{aspect-ratio:16/9;background:center/cover no-repeat;border-radius:10px;margin-bottom:.6rem}
+  .tipimg{display:block;aspect-ratio:16/9;background:var(--chip) center/cover no-repeat;border-radius:10px;margin-bottom:.4rem}
+  #tipGal{margin-bottom:.6rem}
   #tipsSheet .tag{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--accent2);font-weight:600}
   #tipsSheet p{margin:.3rem 0}
   #tipsSheet ul{padding-left:1.1rem;margin:.3rem 0}
@@ -611,10 +612,9 @@ document.getElementById('panel').addEventListener('click',e=>{
 function openTips(wiki){
   const info=INFO[wiki]||{name:MINERAL_LABEL(wiki),tag:'',bars:3,why:[]};
   const tip=TIPS[wiki]||{};
-  const img=document.getElementById('img-'+slug(wiki));
-  const bg=img&&img.style.backgroundImage;
   document.getElementById('tipsBody').innerHTML=`
-    ${bg?`<div class="tipimg" style="background-image:${bg}"></div>`:''}
+    <a class="tipimg" id="tipImg" href="https://en.wikipedia.org/wiki/${encodeURIComponent(wiki.replace(/ /g,'_'))}" target="_blank" rel="noopener"></a>
+    <div class="gallery" id="tipGal"></div>
     <span class="tag">${esc(info.tag)}</span>
     <h2 style="margin:.2rem 0">${esc(info.name)}</h2>
     ${meter(info.bars)}
@@ -629,13 +629,27 @@ function openTips(wiki){
     <p class="small"><a href="https://www.mindat.org/search.php?search=${encodeURIComponent(info.name)}" target="_blank" rel="noopener">More on Mindat</a> · <a href="https://en.wikipedia.org/wiki/${encodeURIComponent(wiki.replace(/ /g,'_'))}" target="_blank" rel="noopener">Wikipedia</a></p>`;
   document.getElementById('tips').classList.add('open');
   document.getElementById('tipsSheet').scrollTop=0;
+  // main photo (already loaded for the card, or fetch it now)
+  const showMain=u=>{const el=document.getElementById('tipImg'); if(el&&tipsFor===wiki){ if(u) el.style.backgroundImage="url('"+u+"')"; else el.style.display='none'; }};
+  tipsFor=wiki;
+  if(PHOTO[wiki]) showMain(PHOTO[wiki]);
+  else fetch('https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&redirects=1&prop=pageimages&piprop=thumbnail&pithumbsize=640&titles='+encodeURIComponent(wiki))
+    .then(r=>r.json()).then(j=>{const pg=Object.values((j.query&&j.query.pages)||{})[0]; const u=pg&&pg.thumbnail&&pg.thumbnail.source; if(u) PHOTO[wiki]=u; showMain(u);})
+    .catch(()=>showMain(null));
+  // extra specimen photos
+  commonsPhotos(MINERAL_LABEL(wiki)).then(list=>{
+    const g=document.getElementById('tipGal'); if(!g||tipsFor!==wiki) return;
+    g.innerHTML=list.slice(0,6).map(galleryLink).join('');
+  }).catch(()=>{});
 }
+let tipsFor=null;
 function closeTips(){document.getElementById('tips').classList.remove('open');}
 document.getElementById('tips').addEventListener('click',e=>{ if(e.target.id==='tips'||e.target.closest('#tipsClose')) closeTips(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeTips(); });
 
 
 /* ---------- Photos: Wikipedia lead images (one batched request) ---------- */
+const PHOTO={};   // wiki title -> photo URL
 async function loadImages(titles,my){
   titles=[...new Set(titles)];
   for(let i=0;i<titles.length;i+=40){
@@ -650,7 +664,7 @@ async function loadImages(titles,my){
       Object.values(q.pages||{}).forEach(p=>{
         const orig=back[p.title]||p.title;
         const el=document.getElementById('img-'+slug(orig)); if(!el) return;
-        if(p.thumbnail){el.style.backgroundImage=`url("${p.thumbnail.source}")`;el.textContent='';}
+        if(p.thumbnail){PHOTO[orig]=p.thumbnail.source; el.style.backgroundImage="url('"+p.thumbnail.source+"')";el.textContent='';}
         else el.textContent='no photo — try More photos';
       });
     }catch(err){ batch.forEach(t=>{const el=document.getElementById('img-'+slug(t)); if(el) el.textContent='photo unavailable';}); }
@@ -658,18 +672,22 @@ async function loadImages(titles,my){
 }
 
 /* ---------- More photos: Wikimedia Commons search ---------- */
-async function morePhotos(wiki){
-  const gal=document.getElementById('gal-'+slug(wiki)); if(!gal) return;
-  const term=MINERAL_LABEL(wiki);
+async function commonsPhotos(term){
   const url='https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=6'
     +'&gsrsearch='+encodeURIComponent(`${term} specimen filetype:bitmap`)+'&prop=imageinfo&iiprop=url&iiurlwidth=240';
+  const j=await (await fetch(url)).json();
+  return Object.values((j.query&&j.query.pages)||{}).sort((a,b)=>a.index-b.index).filter(p=>p.imageinfo);
+}
+function galleryLink(p){
+  const ii=p.imageinfo[0];
+  return `<a href="${esc(ii.descriptionurl)}" target="_blank" rel="noopener" title="${esc(p.title)}" style="background-image:url('${esc(ii.thumburl||ii.url)}')"></a>`;
+}
+async function morePhotos(wiki){
+  const gal=document.getElementById('gal-'+slug(wiki)); if(!gal) return;
   try{
-    const j=await (await fetch(url)).json();
-    const pages=Object.values((j.query&&j.query.pages)||{}).sort((a,b)=>a.index-b.index);
+    const pages=await commonsPhotos(MINERAL_LABEL(wiki));
     if(!pages.length){gal.outerHTML='<p class="small muted">No more photos found.</p>';return;}
-    gal.innerHTML=pages.filter(p=>p.imageinfo).map(p=>{
-      const ii=p.imageinfo[0];
-      return `<a href="${esc(ii.descriptionurl)}" target="_blank" rel="noopener" title="${esc(p.title)}" style="background-image:url('${esc(ii.thumburl||ii.url)}')"></a>`;}).join('');
+    gal.innerHTML=pages.map(galleryLink).join('');
   }catch(err){gal.outerHTML='<p class="small muted">Couldn\'t load more photos.</p>';}
 }
 
