@@ -305,14 +305,36 @@ document.getElementById('searchForm').addEventListener('submit',async e=>{
   const q=document.getElementById('q').value.trim(); if(!q) return;
   setPanel(`<p><span class="spinner"></span>Finding “${esc(q)}”…</p>`);
   try{
-    const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q));
-    const j=await r.json();
-    if(!j.length){setPanel(`<p>Couldn't find “${esc(q)}”. Try adding a state or country.</p>`);return;}
-    const lat=+j[0].lat, lng=+j[0].lon;
-    map.setView([lat,lng],11);
-    lookup(lat,lng,j[0].display_name);
+    const hit=await geocode(q);
+    if(!hit){setPanel(`<p>Couldn't find “${esc(q)}”. Try a nearby town, then tap the spot on the map.</p>`);return;}
+    map.setView([hit.lat,hit.lng],12);
+    lookup(hit.lat,hit.lng,hit.name);
   }catch(err){setPanel(`<p>Place search failed: ${esc(err.message)}</p>`);}
 });
+
+/* Forgiving place search: tries several spellings and two search services */
+async function geocode(q){
+  const variants=[q];
+  const cleaned=q.replace(/\b(lake ?bed|lakebed|bed|area|the)\b/gi,' ').replace(/\s+/g,' ').trim();
+  if(cleaned && cleaned.toLowerCase()!==q.toLowerCase()) variants.push(cleaned);
+  if(/\bdry lake\b/i.test(cleaned)) variants.push(cleaned.replace(/\bdry lake\b/i,'Lake'));
+  for(const v of variants){
+    try{
+      const j=await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(v))).json();
+      if(j.length) return {lat:+j[0].lat,lng:+j[0].lon,name:j[0].display_name};
+    }catch(e){}
+  }
+  for(const v of variants){
+    try{
+      const j=await (await fetch('https://photon.komoot.io/api/?limit=1&q='+encodeURIComponent(v))).json();
+      const f=j.features&&j.features[0];
+      if(f){const p=f.properties||{};
+        return {lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],
+          name:[p.name,p.county||p.city,p.state].filter(Boolean).join(', ')};}
+    }catch(e){}
+  }
+  return null;
+}
 document.getElementById('locBtn').addEventListener('click',()=>{
   if(!navigator.geolocation){setPanel('<p>Location isn\'t available in this browser.</p>');return;}
   setPanel('<p><span class="spinner"></span>Getting your location…</p>');
