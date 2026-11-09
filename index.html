@@ -58,6 +58,19 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   .layerctl{background:var(--panel);color:var(--ink);padding:.4rem .6rem;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.25);font-size:.85rem}
   .layerctl label{display:flex;gap:.4rem;align-items:center;cursor:pointer}
+  .meter{display:flex;align-items:center;gap:.4rem;font-size:.78rem;font-weight:600}
+  .meter .bars{display:flex;gap:2px}
+  .meter .bars i{display:block;width:12px;height:7px;border-radius:2px}
+  .tipsbtn{margin-top:.35rem;background:var(--accent2);font-size:.82rem;padding:.4rem .5rem}
+  #tips{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:2000;align-items:flex-end;justify-content:center}
+  #tips.open{display:flex}
+  #tipsSheet{background:var(--panel);color:var(--ink);width:min(560px,100%);max-height:85vh;overflow:auto;border-radius:16px 16px 0 0;padding:1rem 1.1rem 1.6rem;position:relative}
+  @media (min-width:821px){#tips{align-items:center}#tipsSheet{border-radius:16px}}
+  #tipsClose{position:sticky;top:0;float:right;background:var(--chip);color:var(--ink);border-radius:999px;width:36px;height:36px;padding:0;font-size:1.1rem}
+  .tipimg{aspect-ratio:16/9;background:center/cover no-repeat;border-radius:10px;margin-bottom:.6rem}
+  #tipsSheet .tag{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--accent2);font-weight:600}
+  #tipsSheet p{margin:.3rem 0}
+  #tipsSheet ul{padding-left:1.1rem;margin:.3rem 0}
 </style>
 </head>
 <body>
@@ -77,6 +90,7 @@
     <p class="muted small">Geology data: Macrostrat (CC-BY 4.0). Photos: Wikipedia / Wikimedia Commons.</p>
   </section>
 </main>
+<div id="tips" role="dialog" aria-modal="true" aria-label="Identification tips"><div id="tipsSheet"><button type="button" id="tipsClose" aria-label="Close">✕</button><div id="tipsBody"></div></div></div>
 
 <script>
 /* ---------- Knowledge base: rock types -> description + associated minerals/crystals ----------
@@ -85,124 +99,124 @@
 const ROCKS = [
   {id:"pegmatite", re:/pegmatit/, name:"Pegmatite", wiki:"Pegmatite", kind:"Igneous (intrusive)",
    desc:"Very coarse-grained granite-like rock; famous for large, well-formed crystals.",
-   minerals:["Quartz","Microcline","Muscovite","Tourmaline","Beryl","Garnet","Topaz","Apatite"]},
+   minerals:"Quartz:c,Microcline:c,Muscovite:c,Tourmaline:o,Garnet:o,Beryl:r,Topaz:r,Apatite:r"},
   {id:"granodiorite", re:/granodiorit|tonalit/, name:"Granodiorite", wiki:"Granodiorite", kind:"Igneous (intrusive)",
    desc:"Speckled, coarse-grained intrusive rock between granite and diorite.",
-   minerals:["Plagioclase","Quartz","Hornblende","Biotite","Titanite"]},
+   minerals:"Plagioclase:c,Quartz:c,Hornblende:c,Biotite:c,Titanite:r"},
   {id:"granite", re:/granit|monzogranit|quartz monzonit|plutonic|batholith|felsic intrusive/, name:"Granite", wiki:"Granite", kind:"Igneous (intrusive)",
    desc:"Coarse, light-colored rock made of interlocking feldspar, quartz and mica.",
-   minerals:["Quartz","Orthoclase","Plagioclase","Biotite","Muscovite","Smoky quartz","Tourmaline"]},
+   minerals:"Quartz:c,Orthoclase:c,Biotite:c,Muscovite:o,Plagioclase:c,Smoky quartz:r,Tourmaline:r"},
   {id:"syenite", re:/syenit|monzonit/, name:"Syenite / Monzonite", wiki:"Syenite", kind:"Igneous (intrusive)",
    desc:"Feldspar-rich intrusive rock with little or no quartz.",
-   minerals:["Orthoclase","Nepheline","Hornblende","Zircon","Corundum"]},
+   minerals:"Orthoclase:c,Hornblende:c,Nepheline:o,Zircon:r,Corundum:r"},
   {id:"diorite", re:/\bdiorit|quartz diorit/, name:"Diorite", wiki:"Diorite", kind:"Igneous (intrusive)",
    desc:"Salt-and-pepper intrusive rock of plagioclase and dark minerals.",
-   minerals:["Plagioclase","Hornblende","Biotite","Magnetite"]},
+   minerals:"Plagioclase:c,Hornblende:c,Biotite:o,Magnetite:o"},
   {id:"gabbro", re:/gabbro|norit|anorthosit|mafic intrusive/, name:"Gabbro", wiki:"Gabbro", kind:"Igneous (intrusive)",
    desc:"Dark, coarse-grained rock: the slow-cooled equivalent of basalt.",
-   minerals:["Plagioclase","Augite","Olivine","Magnetite","Labradorite"]},
+   minerals:"Plagioclase:c,Augite:c,Olivine:o,Magnetite:o,Labradorite:r"},
   {id:"diabase", re:/diabas|dolerit|dike|sill/, name:"Diabase", wiki:"Diabase", kind:"Igneous (intrusive)",
    desc:"Fine-to-medium grained dark rock forming dikes and sills.",
-   minerals:["Plagioclase","Augite","Magnetite","Pyrite"]},
+   minerals:"Plagioclase:c,Augite:c,Magnetite:o,Pyrite:r"},
   {id:"peridotite", re:/peridotit|dunit|ultramafic|harzburgit|pyroxenit/, name:"Peridotite", wiki:"Peridotite", kind:"Igneous (ultramafic)",
    desc:"Green, olivine-rich rock from Earth's mantle.",
-   minerals:["Olivine","Augite","Chromite","Magnetite"]},
+   minerals:"Olivine:c,Augite:o,Chromite:o,Magnetite:o"},
   {id:"serpentinite", re:/serpentin|ophiolit/, name:"Serpentinite", wiki:"Serpentinite", kind:"Metamorphic",
    desc:"Slick, green, often mottled rock formed when mantle rock reacts with water.",
-   minerals:["Serpentine subgroup","Chromite","Magnetite","Nephrite","Jadeite","Talc"]},
+   minerals:"Serpentine subgroup:c,Magnetite:c,Chromite:o,Talc:o,Nephrite:r,Jadeite:r"},
   {id:"rhyolite", re:/rhyolit|felsic volcanic|felsite|ignimbrit|welded/, name:"Rhyolite", wiki:"Rhyolite", kind:"Igneous (volcanic)",
    desc:"Light-colored, silica-rich volcanic rock; cavities can hold gem crystals.",
-   minerals:["Quartz","Sanidine","Topaz","Opal","Obsidian","Thunderegg"]},
+   minerals:"Quartz:c,Sanidine:o,Obsidian:o,Opal:o,Thunderegg:r,Topaz:r"},
   {id:"obsidian", re:/obsidian|volcanic glass|perlit/, name:"Obsidian", wiki:"Obsidian", kind:"Igneous (volcanic glass)",
    desc:"Natural volcanic glass with a sharp conchoidal fracture.",
-   minerals:["Obsidian","Apache tears"]},
+   minerals:"Obsidian:c,Apache tears:o"},
   {id:"dacite", re:/dacit/, name:"Dacite", wiki:"Dacite", kind:"Igneous (volcanic)",
    desc:"Intermediate-to-felsic volcanic rock, often in lava domes.",
-   minerals:["Plagioclase","Quartz","Hornblende","Biotite"]},
+   minerals:"Plagioclase:c,Hornblende:c,Biotite:o,Quartz:o"},
   {id:"andesite", re:/andesit|intermediate volcanic/, name:"Andesite", wiki:"Andesite", kind:"Igneous (volcanic)",
    desc:"Gray volcanic rock typical of stratovolcanoes like the Cascades and Andes.",
-   minerals:["Plagioclase","Hornblende","Augite","Agate","Chalcedony"]},
+   minerals:"Plagioclase:c,Hornblende:c,Augite:o,Chalcedony:o,Agate:r"},
   {id:"basalt", re:/basalt|mafic volcanic|lava flow|flood basalt|trap rock/, name:"Basalt", wiki:"Basalt", kind:"Igneous (volcanic)",
    desc:"Dark, fine-grained lava rock; gas bubbles (vesicles) often fill with agate and zeolites.",
-   minerals:["Olivine","Augite","Plagioclase","Zeolite","Agate","Calcite","Native copper"]},
+   minerals:"Plagioclase:c,Augite:c,Olivine:o,Zeolite:o,Calcite:o,Agate:o,Native copper:r"},
   {id:"scoria", re:/scoria|cinder|pumice/, name:"Scoria / Pumice", wiki:"Scoria", kind:"Igneous (volcanic)",
    desc:"Frothy, bubble-filled volcanic rock from cinder cones and explosive eruptions.",
-   minerals:["Olivine","Augite"]},
+   minerals:"Olivine:o,Augite:o"},
   {id:"tuff", re:/tuff|volcaniclastic|pyroclastic|ash.?flow|volcanic ash|tephra/, name:"Tuff", wiki:"Tuff", kind:"Igneous (pyroclastic)",
    desc:"Rock made of consolidated volcanic ash; hosts thundereggs, opal and petrified wood.",
-   minerals:["Opal","Chalcedony","Zeolite","Thunderegg","Petrified wood"]},
+   minerals:"Chalcedony:o,Opal:o,Zeolite:o,Petrified wood:r,Thunderegg:r"},
   {id:"sandstone", re:/sandston|arenit|arkos|graywack|greywack|quartz sand/, name:"Sandstone", wiki:"Sandstone", kind:"Sedimentary",
    desc:"Cemented sand grains; colors come from iron oxides.",
-   minerals:["Quartz","Hematite","Limonite","Petrified wood","Concretion","Barite rose"]},
+   minerals:"Quartz:c,Hematite:c,Limonite:o,Concretion:o,Petrified wood:r,Barite rose:r"},
   {id:"conglomerate", re:/conglomerat|breccia|fanglomerat/, name:"Conglomerate / Breccia", wiki:"Conglomerate (geology)", kind:"Sedimentary",
    desc:"Rounded (conglomerate) or angular (breccia) pebbles cemented together.",
-   minerals:["Quartz","Jasper","Chert","Hematite"]},
+   minerals:"Quartz:c,Jasper:o,Chert:o,Hematite:o"},
   {id:"siltstone", re:/siltston|silt/, name:"Siltstone", wiki:"Siltstone", kind:"Sedimentary",
    desc:"Fine-grained rock of silt, between sandstone and shale.",
-   minerals:["Quartz","Muscovite","Pyrite","Fossil"]},
+   minerals:"Quartz:c,Muscovite:o,Fossil:o,Pyrite:r"},
   {id:"shale", re:/shale|mudston|claystone|argillit|mudrock|clay/, name:"Shale / Mudstone", wiki:"Shale", kind:"Sedimentary",
    desc:"Layered, fine-grained rock of mud and clay; often fossil-bearing.",
-   minerals:["Pyrite","Gypsum","Selenite","Concretion","Fossil"]},
+   minerals:"Fossil:o,Pyrite:o,Concretion:o,Gypsum:o,Selenite:r"},
   {id:"limestone", re:/limeston|carbonate|chalk|marl|calcarenit|reef/, name:"Limestone", wiki:"Limestone", kind:"Sedimentary",
    desc:"Calcium carbonate rock, often from shells and reefs; caves and geodes form in it.",
-   minerals:["Calcite","Geode","Fluorite","Celestine (mineral)","Chert","Fossil","Sphalerite","Galena"]},
+   minerals:"Calcite:c,Fossil:c,Chert:o,Geode:o,Fluorite:r,Celestine (mineral):r,Sphalerite:r,Galena:r"},
   {id:"dolostone", re:/dolomit|dolosto/, name:"Dolostone", wiki:"Dolomite (rock)", kind:"Sedimentary",
    desc:"Magnesium-rich cousin of limestone.",
-   minerals:["Dolomite (mineral)","Calcite","Quartz","Sphalerite","Galena","Fluorite"]},
+   minerals:"Dolomite (mineral):c,Calcite:c,Quartz:o,Sphalerite:r,Galena:r,Fluorite:r"},
   {id:"travertine", re:/travertin|tufa|spring deposit/, name:"Travertine", wiki:"Travertine", kind:"Sedimentary",
    desc:"Banded carbonate rock deposited by mineral springs.",
-   minerals:["Calcite","Aragonite"]},
+   minerals:"Calcite:c,Aragonite:o"},
   {id:"chert", re:/chert|flint|novaculit|jasper|radiolarit/, name:"Chert", wiki:"Chert", kind:"Sedimentary",
    desc:"Hard, glassy microcrystalline quartz rock; prized for tools and lapidary.",
-   minerals:["Chert","Jasper","Chalcedony","Agate"]},
+   minerals:"Chert:c,Jasper:o,Chalcedony:o,Agate:r"},
   {id:"evaporite", re:/evaporit|gypsum|anhydrit|halit|\bsalt\b|rock salt|playa/, name:"Evaporites", wiki:"Evaporite", kind:"Sedimentary",
    desc:"Minerals left behind when salty water evaporates.",
-   minerals:["Gypsum","Selenite","Halite","Celestine (mineral)","Desert rose (crystal)"]},
+   minerals:"Gypsum:c,Selenite:c,Halite:o,Desert rose (crystal):o,Celestine (mineral):r"},
   {id:"coal", re:/coal|lignit/, name:"Coal", wiki:"Coal", kind:"Sedimentary (organic)",
    desc:"Compressed plant matter; associated shales preserve plant fossils.",
-   minerals:["Pyrite","Marcasite","Fossil"]},
+   minerals:"Fossil:c,Pyrite:o,Marcasite:o"},
   {id:"iron", re:/iron formation|banded iron|taconit|ironston/, name:"Banded iron formation", wiki:"Banded iron formation", kind:"Sedimentary",
    desc:"Striped layers of iron oxide and chert, among Earth's oldest rocks.",
-   minerals:["Hematite","Magnetite","Jasper","Tiger's eye"]},
+   minerals:"Hematite:c,Magnetite:c,Jasper:o,Tiger's eye:r"},
   {id:"slate", re:/slate/, name:"Slate", wiki:"Slate", kind:"Metamorphic",
    desc:"Low-grade metamorphosed shale that splits into flat sheets.",
-   minerals:["Pyrite","Muscovite","Chlorite group"]},
+   minerals:"Muscovite:c,Chlorite group:o,Pyrite:o"},
   {id:"phyllite", re:/phyllit/, name:"Phyllite", wiki:"Phyllite", kind:"Metamorphic",
    desc:"Silky-sheened metamorphic rock between slate and schist.",
-   minerals:["Muscovite","Chlorite group","Quartz"]},
+   minerals:"Muscovite:c,Chlorite group:c,Quartz:o"},
   {id:"schist", re:/schist/, name:"Schist", wiki:"Schist", kind:"Metamorphic",
    desc:"Glittery, platy metamorphic rock; often studded with garnets.",
-   minerals:["Muscovite","Biotite","Garnet","Staurolite","Kyanite","Tourmaline"]},
+   minerals:"Muscovite:c,Biotite:c,Garnet:o,Tourmaline:o,Staurolite:r,Kyanite:r"},
   {id:"greenschist", re:/greenstone|greenschist|metavolcanic|metabasalt|spilit/, name:"Greenstone", wiki:"Greenstone belt", kind:"Metamorphic",
    desc:"Altered volcanic rock colored green by chlorite and epidote; classic gold country.",
-   minerals:["Chlorite group","Epidote","Actinolite","Quartz","Pyrite","Gold"]},
+   minerals:"Chlorite group:c,Epidote:c,Actinolite:o,Quartz:o,Pyrite:o,Gold:r"},
   {id:"amphibolite", re:/amphibolit|hornblende/, name:"Amphibolite", wiki:"Amphibolite", kind:"Metamorphic",
    desc:"Dark metamorphic rock rich in hornblende.",
-   minerals:["Hornblende","Plagioclase","Garnet","Epidote"]},
+   minerals:"Hornblende:c,Plagioclase:c,Garnet:o,Epidote:o"},
   {id:"gneiss", re:/gneiss|migmatit|orthogneiss|paragneiss|granulit/, name:"Gneiss", wiki:"Gneiss", kind:"Metamorphic",
    desc:"High-grade, banded metamorphic rock of light and dark layers.",
-   minerals:["Quartz","Orthoclase","Biotite","Garnet","Sillimanite","Kyanite"]},
+   minerals:"Quartz:c,Orthoclase:c,Biotite:c,Garnet:o,Sillimanite:r,Kyanite:r"},
   {id:"quartzite", re:/quartzit|metasandston|metaquartz/, name:"Quartzite", wiki:"Quartzite", kind:"Metamorphic",
    desc:"Very hard, recrystallized sandstone.",
-   minerals:["Quartz","Muscovite","Kyanite","Hematite"]},
+   minerals:"Quartz:c,Muscovite:o,Hematite:o,Kyanite:r"},
   {id:"marble", re:/marble/, name:"Marble", wiki:"Marble", kind:"Metamorphic",
    desc:"Recrystallized limestone; skarns at its contacts host colorful crystals.",
-   minerals:["Calcite","Dolomite (mineral)","Garnet","Wollastonite","Corundum","Graphite"]},
+   minerals:"Calcite:c,Dolomite (mineral):o,Graphite:o,Garnet:r,Wollastonite:r,Corundum:r"},
   {id:"skarn", re:/skarn|tactit|contact metamorph|hornfels/, name:"Skarn / Hornfels", wiki:"Skarn", kind:"Metamorphic (contact)",
    desc:"Rock baked where magma met carbonate or shale; rich in unusual minerals.",
-   minerals:["Garnet","Epidote","Wollastonite","Magnetite","Vesuvianite"]},
+   minerals:"Garnet:c,Epidote:c,Magnetite:o,Wollastonite:o,Vesuvianite:r"},
   {id:"alluvium", re:/alluvi|fluvial|stream deposit|gravel|floodplain|terrace|unconsolidated|surficial/, name:"Alluvium (river sediment)", wiki:"Alluvium", kind:"Sediment (unconsolidated)",
    desc:"Loose sand and gravel from rivers; a mix of pebbles washed down from upstream.",
-   minerals:["Quartz","Agate","Jasper","Petrified wood","Garnet","Gold"]},
+   minerals:"Quartz:c,Jasper:o,Agate:o,Garnet:o,Petrified wood:r,Gold:r"},
   {id:"till", re:/\btill|glacial|moraine|outwash|drift/, name:"Glacial till / drift", wiki:"Till", kind:"Sediment (glacial)",
    desc:"Mixed debris dumped by ice sheets; may contain rocks carried hundreds of miles.",
-   minerals:["Quartz","Granite","Agate","Garnet"]},
+   minerals:"Quartz:c,Granite:c,Garnet:o,Agate:r"},
   {id:"eolian", re:/eolian|aeolian|dune|loess|windblown/, name:"Wind-blown sand & loess", wiki:"Loess", kind:"Sediment (eolian)",
    desc:"Sand dunes and silt deposited by wind.",
-   minerals:["Quartz","Ventifact"]},
+   minerals:"Quartz:c,Ventifact:o"},
   {id:"beach", re:/beach|coastal|marine terrace|estuar/, name:"Coastal sediment", wiki:"Beach", kind:"Sediment (coastal)",
    desc:"Sand and gravel worked by waves.",
-   minerals:["Quartz","Agate","Jasper","Magnetite"]},
+   minerals:"Quartz:c,Magnetite:o,Jasper:o,Agate:r"},
 ];
 
 /* Mineral display names & short notes. Key = Wikipedia title. */
@@ -279,6 +293,117 @@ const MINERALS = {
   "Ventifact":["Rocks sandblasted into facets by wind."],
 };
 const MINERAL_LABEL = t => t.replace(/ \((mineral|crystal)\)$/,"").replace(" subgroup","").replace(" group","");
+/* ---------- Identification & where-to-look tips. Key = Wikipedia title. [identify, find] ---------- */
+const TIPS_RAW = {
+ "Pegmatite":["Huge interlocking crystals, often thumb-size or bigger: pink or white feldspar, glassy gray quartz, and books of mica.","Look for light-colored veins or dikes cutting through granite or gneiss. Road cuts and old mine dumps are best."],
+ "Granodiorite":["Speckled salt-and-pepper look. It has more white feldspar and black specks (hornblende, biotite) than granite, and less pink.","Mountain cores, big boulder fields and road cuts in granite country."],
+ "Granite":["Coarse grains you can see by eye: glassy gray quartz, pink or white feldspar, black mica flakes. Hard enough to scratch glass.","Domes, boulder piles and stream cobbles. Weathered granite crumbles into coarse, sparkly sand (grus)."],
+ "Syenite":["Looks like granite but has little or no glassy quartz; it's mostly blocky pink or gray feldspar.","Small intrusions; quarries and road cuts."],
+ "Diorite":["About half white and half black grains with little quartz, like a dalmatian pattern.","Edges of granite bodies and road cuts."],
+ "Gabbro":["Dark gray to black, coarse-grained and heavy for its size, with little or no quartz.","Mountain belts and slices of old ocean crust; also as stream cobbles."],
+ "Diabase":["Dark and fine-to-medium grained, often with tiny white needle-like feldspar crystals.","Dark bands (dikes) cutting across lighter rock in cliffs or road cuts."],
+ "Peridotite":["Grainy yellow-green to olive, heavy; weathers to a rusty brown crust.","Ophiolite belts, and as green chunks (xenoliths) inside some basalts."],
+ "Serpentinite":["Green to black, waxy or slick feel, often mottled, with shiny polished-looking surfaces. A knife scratches it.","Coast ranges and fault zones. Patchy, sparse vegetation on odd soils is a clue."],
+ "Rhyolite":["Fine-grained pink, tan, lavender or gray rock, often flow-banded, with small quartz or feldspar crystals.","Volcanic fields. Check gas cavities and round 'lithophysae' for crystals."],
+ "Obsidian":["Glossy black (sometimes brown, red or banded) glass with sharp curved fractures. Handle carefully: edges cut like glass.","Young lava flows and domes, and pieces scattered on the slopes below them."],
+ "Dacite":["Light-to-medium gray and fine-grained, with white feldspar and black hornblende specks.","Lava domes and volcanic mountains."],
+ "Andesite":["Medium gray to purplish, fine-grained, with small white or black crystals scattered through.","Volcanic mountains and flows; check cavities for agate."],
+ "Basalt":["Dark gray to black, fine-grained and heavy; often full of gas holes (vesicles).","Lava flows, cliffs and columns. Check vesicles for zeolites, calcite and agate."],
+ "Scoria":["Very bubbly, rough and lightweight; reddish or black. Pumice is pale and can float on water.","Cinder cones and cinder quarries."],
+ "Tuff":["Light, often pastel, gritty or chalky rock with bits of pumice and crystals; can be soft.","Layered cliffs in volcanic areas. Thundereggs and petrified wood weather out of tuff beds."],
+ "Sandstone":["Feels gritty, like sandpaper; you can see sand grains. Layered; red, tan, white or brown.","Cliffs, canyons and ledges. Look for cross-bedding and iron concretions."],
+ "Conglomerate (geology)":["Pebbles and cobbles cemented in sand: rounded pebbles mean conglomerate, angular ones mean breccia.","Ancient river and alluvial fan deposits, often at cliff bases."],
+ "Siltstone":["Smoother than sandstone but feels slightly gritty against your teeth; doesn't split as well as shale.","Interlayered with sandstone and shale."],
+ "Shale":["Fine and smooth, splits into thin layers; gray, black, red or green; smells earthy when wet.","Slopes, gullies and road cuts. Split the layers to look for fossils."],
+ "Limestone":["Gray to tan; a knife scratches it, and it fizzes in acid (slowly in vinegar). Often contains fossils.","Cliffs, caves and quarries. Geodes weather out into creek beds below."],
+ "Dolomite (rock)":["Like limestone, but it only fizzes when powdered. Often weathers to a tan or buff, sandy-feeling surface.","Same settings as limestone; old quarries and mines."],
+ "Travertine":["Banded cream to tan, often porous or full of small holes.","Around hot or mineral springs, past and present."],
+ "Chert":["Very hard (a knife won't scratch it), waxy-to-glassy look, breaks with smooth curved surfaces.","Nodules and layers in limestone; common in stream gravels."],
+ "Evaporite":["Soft white or clear crusts and crystals. Halite tastes salty; gypsum scratches with a fingernail.","Dry lake beds (playas) and their edges. Dig a few inches below the surface crust."],
+ "Coal":["Black and lightweight; dull or shiny; leaves a black smudge on your fingers.","Layers between shale and sandstone; old mining areas."],
+ "Banded iron formation":["Alternating red, black and silver-gray stripes; very heavy, and some layers are magnetic.","Ancient shield areas, such as the Lake Superior region."],
+ "Slate":["Dark gray to black, splits into flat hard sheets, and rings when tapped.","Mountain belts and old quarries."],
+ "Phyllite":["Like slate but with a silky sheen, often wavy.","Mountain belts."],
+ "Schist":["Sparkly, flaky layers of mica, often dotted with red garnets.","Mountain cores and road cuts."],
+ "Greenstone belt":["Dull green, fine-grained and hard; may have white quartz veins.","Ancient volcanic belts, including many historic gold districts."],
+ "Amphibolite":["Dark green-black, with aligned sparkly hornblende crystals and sometimes red garnets.","Metamorphic terrains and road cuts."],
+ "Gneiss":["Light and dark bands, often wavy or folded; coarse grains.","Old mountain cores and shield areas."],
+ "Quartzite":["Very hard and sugary-glittery; it breaks through the grains rather than around them.","Ridges that resist erosion; common as smooth stream cobbles."],
+ "Marble":["Sugary interlocking crystals; fizzes in acid, and a knife scratches it.","Quarries and metamorphic belts."],
+ "Skarn":["Heavy, colorful mixed rock with garnet, green epidote and other unusual minerals.","Where granite meets limestone; often around old mines."],
+ "Alluvium":["Loose sand, gravel and cobbles of many different rock types.","Washes, stream beds and gravel bars. The best time to look is after floods."],
+ "Till":["An unsorted mix of everything from clay to boulders.","Moraines, plowed fields and gravel pits."],
+ "Loess":["Fine, well-sorted sand or yellowish silt.","Dunes and bluffs; look for wind-polished stones."],
+ "Beach":["Rounded sand and pebbles.","Beaches at low tide, especially after storms."],
+ "Quartz":["Glassy, hardness 7 (scratches glass), six-sided crystals that end in a point. It breaks like glass, with no flat cleavage.","Veins in almost any rock, geodes and stream gravels. White quartz veins stand out on hillsides."],
+ "Smoky quartz":["Quartz colored brown-gray to black; just as glassy and hard.","Pockets in granite and pegmatite."],
+ "Orthoclase":["Pink, cream or white blocky crystals, hardness 6. Two flat cleavages at 90° flash in the light.","Granite and pegmatites."],
+ "Microcline":["Like orthoclase; the blue-green variety is amazonite.","Pegmatites."],
+ "Plagioclase":["White to gray, hardness 6. Look for fine parallel lines (striations) on flat faces.","Most igneous rocks."],
+ "Labradorite":["Gray feldspar that flashes blue and green when you turn it in sunlight.","Gabbro and anorthosite; also as stream cobbles."],
+ "Muscovite":["Clear-to-silvery mica that peels into thin, flexible sheets.","Granite, pegmatite and schist; glitters in creek sand."],
+ "Biotite":["Black-brown mica that peels into thin sheets.","Granite, schist and gneiss."],
+ "Hornblende":["Black to dark green long prisms, with two cleavages at about 60° and 120°.","Diorite, andesite and amphibolite."],
+ "Tourmaline":["Long, striated prisms with a rounded-triangle cross-section; black is most common. Hardness 7, no cleavage.","Pegmatites, granite and schist."],
+ "Beryl":["Six-sided prisms with flat ends, hardness 8; green, blue or yellow.","Pegmatites."],
+ "Topaz":["Hardness 8, very glassy, with one perfect cleavage; clear, sherry-colored or blue.","Cavities in rhyolite, and pegmatites."],
+ "Apatite":["Six-sided crystals, hardness 5 (a knife scratches it with effort); often green or blue.","Pegmatites and many igneous rocks."],
+ "Garnet":["Round, 12-sided crystals, deep red to brown, hardness 7, no cleavage.","Schist and gneiss. It's heavy, so it concentrates in stream gravel and beach sand."],
+ "Titanite":["Wedge-shaped, honey-brown crystals with a bright, diamond-like luster.","Granodiorite and diorite."],
+ "Zircon":["Tiny, very hard square prisms, often brown.","Pan the heavy sand in streams."],
+ "Corundum":["Hardness 9, with hexagonal barrel-shaped crystals; heavy.","Syenites, marble and gem gravels."],
+ "Nepheline":["Gray with a greasy look, hardness 6.","Syenites."],
+ "Sanidine":["Clear, glassy, tabular feldspar.","Rhyolite."],
+ "Olivine":["Olive-green glassy grains, hardness 6.5–7.","Basalt and peridotite; green-sand beaches."],
+ "Augite":["Dark green-black, stubby eight-sided prisms with cleavages near 90°.","Basalt and gabbro."],
+ "Magnetite":["Black and metallic; sticks to a magnet.","Black sand in streams and beaches. Run a magnet in a plastic bag through it."],
+ "Chromite":["Black, metallic to submetallic, brown streak, weakly magnetic.","Serpentinite."],
+ "Serpentine subgroup":["Green, waxy and smooth; fairly soft (hardness 3–5).","Serpentinite."],
+ "Nephrite":["Waxy green and extremely tough: very hard to break with a hammer. Hardness 6–6.5.","Contacts around serpentinite; stream boulders."],
+ "Jadeite":["Tough and granular, green to white, hardness 6.5–7.","High-pressure metamorphic belts; rare."],
+ "Talc":["The softest mineral: a fingernail scratches it, and it feels soapy.","Altered ultramafic rocks."],
+ "Opal":["Glassy to waxy, no crystals, smooth curved breaks, hardness 5.5–6. Common opal lacks the rainbow 'play of color'.","Volcanic tuff and rhyolite, and inside petrified wood."],
+ "Apache tears":["Small rounded obsidian pebbles that glow translucent brown when held up to the light.","Weathering out of gray perlite."],
+ "Thunderegg":["A plain, knobby, round rock, heavy for its size. You only see the agate or opal center when it's cut.","Rhyolite and tuff beds."],
+ "Agate":["Translucent, waxy and banded, hardness 7.","Gravels and basalt cavities. Walk with the sun ahead of you so translucent pebbles glow."],
+ "Chalcedony":["Waxy and translucent like agate, but without bands.","Gravels and volcanic cavities."],
+ "Jasper":["Opaque solid red, yellow or brown, with a waxy polish; hardness 7.","Gravels and chert beds."],
+ "Zeolite":["White to clear sprays of needles or blocky crystals, fairly soft.","Gas holes in basalt."],
+ "Native copper":["Copper-colored metal, often with a green crust; it bends instead of breaking.","Basalt and conglomerate, famously around Lake Superior."],
+ "Calcite":["Hardness 3 (a knife scratches it), fizzes in acid, and breaks into slanted rhombs. Clear calcite shows a double image of text.","Limestone, white veins, geodes and caves."],
+ "Aragonite":["Needles, columns or coral-like shapes; fizzes in acid.","Springs and caves."],
+ "Geode":["Round, with a cauliflower-like bumpy skin; lighter than a solid rock its size because it's hollow.","Creek beds below limestone and shale, and weathering out of the soil."],
+ "Fluorite":["Cubes in purple, green or yellow, hardness 4; often glows under UV light.","Veins in limestone and dolostone; mine dumps."],
+ "Celestine (mineral)":["Pale blue tabular crystals, heavy for their size, hardness 3–3.5.","Geodes, limestone and evaporites."],
+ "Sphalerite":["Resinous brown, yellow or black, hardness 3.5–4, with many shiny cleavage faces.","Ore in limestone; mine dumps."],
+ "Galena":["Silver-gray metallic cubes, very heavy, soft (hardness 2.5), breaks into cubes.","Veins in limestone; mine dumps."],
+ "Barite rose":["Reddish-brown rosettes of bladed crystals, heavy for their size.","Sandstone; Oklahoma is famous for them."],
+ "Hematite":["Always leaves a red-brown streak; can look metallic gray or earthy red.","Sandstone cement and iron formations."],
+ "Limonite":["Yellow-brown, earthy, rusty-looking, with a yellow-brown streak.","Weathered iron-bearing rocks."],
+ "Concretion":["Round, hard nodules, often with concentric layers.","Shale and sandstone outcrops."],
+ "Petrified wood":["Shows tree rings and wood grain, but it's hard stone (hardness 7).","Volcanic ash and sandstone areas. Public land has collecting limits, and it's illegal in national parks."],
+ "Fossil":["Shapes of shells, leaves, bones or tracks in the rock.","Sedimentary layers; split shale along its layers."],
+ "Pyrite":["Brassy-gold metallic cubes, greenish-black streak, hard and brittle. Real gold is soft and bends.","Shale, coal, slate and veins."],
+ "Marcasite":["Pale brassy, crumbly, often in cockscomb shapes.","Coal and shale."],
+ "Gypsum":["Soft enough to scratch with a fingernail; white or clear.","Dry lakes and evaporite beds."],
+ "Selenite":["Clear, glassy gypsum blades that bend slightly and split into sheets.","Dry lakes and clay beds; dig just below the surface."],
+ "Halite":["Cubic crystals; tastes salty and dissolves in water.","Salt flats."],
+ "Desert rose (crystal)":["Rose-like clusters of bladed crystals with sand trapped inside.","Desert playas, just under the surface."],
+ "Dolomite (mineral)":["Curved, saddle-shaped pink or white crystals; fizzes only when powdered.","Dolostone and veins."],
+ "Tiger's eye":["Golden-brown silky stripes that shimmer as you turn it.","Iron formations."],
+ "Chlorite group":["Soft, flaky and green; bends but doesn't spring back like mica.","Greenschist and greenstone."],
+ "Epidote":["Pistachio-green striated prisms, hardness 6–7.","Skarn and greenstone."],
+ "Actinolite":["Green needles or blades.","Greenschist."],
+ "Gold":["Butter-yellow, very heavy and soft (it bends or dents, never shatters); doesn't tarnish.","Pan stream gravels below quartz veins. Check for mining claims first."],
+ "Staurolite":["Brown prisms, sometimes twinned into crosses.","Schist."],
+ "Kyanite":["Blue blades. A knife scratches it lengthwise but not across the blade.","Schist, gneiss and quartzite."],
+ "Sillimanite":["White fibrous needles.","High-grade gneiss."],
+ "Wollastonite":["White and fibrous; may glow under UV light.","Skarn and marble."],
+ "Vesuvianite":["Green-brown square prisms.","Skarn."],
+ "Graphite":["Black, soft and greasy; leaves marks on paper like a pencil.","Marble and schist."],
+ "Ventifact":["Rocks sandblasted by wind into smooth, polished facets with sharp edges.","Desert pavements and wind-swept flats."],
+};
+const TIPS={}; Object.entries(TIPS_RAW).forEach(([k,[id,find]])=>TIPS[k]={id,find});
 
 /* ---------- Map ---------- */
 const map = L.map('map',{zoomControl:true}).setView([39.5,-98.35],4);
@@ -369,34 +494,66 @@ async function lookup(lat,lng,label){
   // dedupe by name+lith
   const seen=new Set(); units=units.filter(u=>{const k=(u.name||'')+'|'+(u.lith||'');if(seen.has(k))return false;seen.add(k);return true;}).slice(0,4);
 
-  // Match rock types, ranking by the most detailed unit first and by position in its lithology text
+  // ---- Match rock types and rate how much of each is mapped here ----
   const found=new Map();
   units.forEach((u,ui)=>{
     const lith=(u.lith||'').toLowerCase();
     const text=[u.lith,u.name,u.strat_name,u.descrip].filter(Boolean).join(' ').toLowerCase();
+    const majI=lith.indexOf('major'), minI=lith.indexOf('minor');
     ROCKS.forEach(rk=>{
       const m=text.match(rk.re); if(!m) return;
-      const posInLith = lith.search(rk.re);
-      const score = ui*1000 + (posInLith>=0?posInLith:500+m.index/10);
-      if(!found.has(rk.id)||found.get(rk.id).score>score) found.set(rk.id,{rock:rk,score});
+      const p=lith.search(rk.re);
+      let role;
+      if(p<0) role='mentioned';
+      else if(majI>=0||minI>=0){
+        role = (minI>=0 && p>minI && (majI<0||majI<minI||p<majI)) ? 'minor' : 'major';
+      } else {
+        const firstItem=lith.split(/[,;]| and | or |\//)[0];
+        role = firstItem.search(rk.re)>=0 ? 'major' : 'minor';
+      }
+      let level = role==='major'?3 : role==='minor'?2 : 1;
+      if(ui>0) level=Math.max(1,level-1);          // less-detailed map or nearby unit
+      const rank = (3-level)*1000 + ui*100 + (p>=0?p/10:50);
+      const prev=found.get(rk.id);
+      if(!prev||prev.rank>rank) found.set(rk.id,{rock:rk,level,role,ui,rank});
     });
   });
-  // avoid granite + granodiorite + pegmatite overlap noise: keep all but sort
-  let rocks=[...found.values()].sort((a,b)=>a.score-b.score).map(x=>x.rock).slice(0,6);
+  const rocks=[...found.values()].sort((a,b)=>a.rank-b.rank).slice(0,6);
 
-  // Gather minerals
-  const minCount=new Map();
-  rocks.forEach((rk,i)=>rk.minerals.forEach(m=>{
-    const w=6-i; minCount.set(m,(minCount.get(m)||0)+w);
+  // ---- Minerals: combine rock likelihood with how common the mineral is in that rock ----
+  const ABW={c:3,o:2,r:1}, ABT={c:'Common',o:'Occasional',r:'Rare'};
+  const minMap=new Map();
+  rocks.forEach(f=>parseMinerals(f.rock).forEach(([m,a])=>{
+    if(rocks.some(r=>r.rock.wiki===m)) return;
+    const s=f.level+ABW[a];
+    const why=`${ABT[a]} in ${f.rock.name} (${ROLE_TXT(f)})`;
+    const prev=minMap.get(m);
+    if(!prev) minMap.set(m,{name:m,score:s,whys:[why]});
+    else { prev.whys.push(why); if(s>prev.score) {prev.score=s; prev.whys.unshift(prev.whys.pop());} }
   }));
-  const minerals=[...minCount.entries()].sort((a,b)=>b[1]-a[1]).map(x=>x[0])
-    .filter(m=>!rocks.some(r=>r.wiki===m)).slice(0,12);
+  const minerals=[...minMap.values()].sort((a,b)=>b.score-a.score||b.whys.length-a.whys.length).slice(0,12);
 
   renderResults(where,lat,lng,units,rocks,minerals);
-  loadImages([...rocks.map(r=>r.wiki),...minerals],my);
+  loadImages([...rocks.map(r=>r.rock.wiki),...minerals.map(m=>m.name)],my);
+}
+
+function parseMinerals(rk){ return rk.minerals.split(',').map(s=>{const i=s.lastIndexOf(':');return [s.slice(0,i),s.slice(i+1)];}); }
+function ROLE_TXT(f){
+  const base = f.role==='major'?'a main rock mapped here' : f.role==='minor'?'a minor rock mapped here' : 'mentioned in the map description';
+  return f.ui>0 ? base.replace('mapped here','in a broader map of the area') : base;
+}
+/* Likelihood scale: 5 = very likely … 1 = rare */
+const LIKE=[null,
+  {t:'Rare',c:'#9a8f85'},{t:'Uncommon',c:'#c28a3a'},{t:'Possible',c:'#c9a227'},{t:'Likely',c:'#6f9a4a'},{t:'Very likely',c:'#3d7a52'}];
+function rockBars(level){return level===3?5:level===2?4:2;}
+function minBars(score){return Math.max(1,Math.min(5,score-1));}
+function meter(n){
+  const L=LIKE[n];
+  return `<div class="meter" title="Estimated likelihood"><span class="bars">${[1,2,3,4,5].map(i=>`<i style="background:${i<=n?L.c:'var(--line)'}"></i>`).join('')}</span><span style="color:${L.c}">${L.t}</span></div>`;
 }
 
 /* ---------- Rendering ---------- */
+const INFO={};   // details for the Tips panel, keyed by wiki title
 function renderResults(where,lat,lng,units,rocks,minerals){
   const unitHtml=units.map(u=>{
     const age=[u.b_int_name,u.t_int_name].filter(Boolean);
@@ -409,9 +566,13 @@ function renderResults(where,lat,lng,units,rocks,minerals){
       ${u.descrip?`<div class="small muted">${esc(trim(u.descrip,260))}</div>`:''}
     </div></div>`;}).join('');
 
-  const rockHtml = rocks.length? `<div class="grid">${rocks.map(r=>card(r.wiki,r.name,r.kind,r.desc,true)).join('')}</div>`
+  rocks.forEach(f=>{INFO[f.rock.wiki]={name:f.rock.name,tag:f.rock.kind,bars:rockBars(f.level),
+    why:[`${f.rock.name} is ${ROLE_TXT(f)}.`]};});
+  minerals.forEach(m=>{INFO[m.name]={name:MINERAL_LABEL(m.name),tag:'Mineral / crystal',bars:minBars(m.score),why:m.whys.map(w=>w+'.')};});
+
+  const rockHtml = rocks.length? `<div class="grid">${rocks.map(f=>card(f.rock.wiki,f.rock.name,f.rock.kind,f.rock.desc,rockBars(f.level))).join('')}</div>`
     : `<p class="muted">The map description didn't match a rock type in Rock Finder's list. See the unit details above.</p>`;
-  const minHtml = minerals.length? `<div class="grid">${minerals.map(m=>card(m,MINERAL_LABEL(m),'Mineral / crystal',(MINERALS[m]||[''])[0],false)).join('')}</div>`:'';
+  const minHtml = minerals.length? `<div class="grid">${minerals.map(m=>card(m.name,MINERAL_LABEL(m.name),'Mineral / crystal',(MINERALS[m.name]||[''])[0],minBars(m.score))).join('')}</div>`:'';
 
   setPanel(`<h2>${where}</h2>
     <p class="small muted">${lat.toFixed(4)}, ${lng.toFixed(4)} ·
@@ -420,15 +581,18 @@ function renderResults(where,lat,lng,units,rocks,minerals){
     <h3>Mapped geology here</h3>${unitHtml}
     <h3>Rock types</h3>${rockHtml}
     ${minHtml?`<h3>Minerals & crystals you might find</h3>${minHtml}`:''}
-    <div class="note">These are the rocks mapped at this spot and the minerals <i>commonly associated</i> with them, not a guarantee of what's on the ground. Check land ownership and rules first: collecting is banned in national parks and needs permission on private land.</div>
+    <div class="note"><b>About the likelihood ratings:</b> they're estimates, not measured odds. Each rating combines how much of a rock is mapped at this spot (main rock, minor rock, or only mentioned) with how common the mineral is in that rock type. No database records real "chance of finding" figures. Exposure, weathering and past collecting all change what's actually on the ground.<br><br>Check land ownership and rules first: collecting is banned in national parks and needs permission on private land.</div>
     <p class="small muted">Geology: <a href="https://macrostrat.org" target="_blank" rel="noopener">Macrostrat</a> (CC-BY 4.0) and its source maps. Photos: Wikipedia / Wikimedia Commons; tap a photo for its credits and license.</p>`);
 }
 
-function card(wiki,name,tag,desc,isRock){
+function card(wiki,name,tag,desc,bars){
   const id='img-'+slug(wiki);
   return `<div class="card">
     <a class="img" id="${id}" href="https://en.wikipedia.org/wiki/${encodeURIComponent(wiki.replace(/ /g,'_'))}" target="_blank" rel="noopener">loading photo…</a>
-    <div class="body"><span class="tag">${esc(tag)}</span><b>${esc(name)}</b>${desc?`<p>${esc(desc)}</p>`:''}
+    <div class="body"><span class="tag">${esc(tag)}</span><b>${esc(name)}</b>
+      ${meter(bars)}
+      ${desc?`<p>${esc(desc)}</p>`:''}
+      <button type="button" class="tipsbtn" data-tips="${esc(wiki)}">🔍 How to identify & find</button>
       <div class="gallery" id="gal-${slug(wiki)}"></div>
       <div class="links">
         <a href="#" data-more="${esc(wiki)}">More photos</a>
@@ -437,9 +601,39 @@ function card(wiki,name,tag,desc,isRock){
 }
 
 document.getElementById('panel').addEventListener('click',e=>{
+  const t=e.target.closest('[data-tips]');
+  if(t){ openTips(t.dataset.tips); return; }
   const a=e.target.closest('a[data-more]'); if(!a) return;
   e.preventDefault(); a.textContent='Loading…'; morePhotos(a.dataset.more).then(()=>a.remove());
 });
+
+/* ---------- Tips pop-out ---------- */
+function openTips(wiki){
+  const info=INFO[wiki]||{name:MINERAL_LABEL(wiki),tag:'',bars:3,why:[]};
+  const tip=TIPS[wiki]||{};
+  const img=document.getElementById('img-'+slug(wiki));
+  const bg=img&&img.style.backgroundImage;
+  document.getElementById('tipsBody').innerHTML=`
+    ${bg?`<div class="tipimg" style="background-image:${bg}"></div>`:''}
+    <span class="tag">${esc(info.tag)}</span>
+    <h2 style="margin:.2rem 0">${esc(info.name)}</h2>
+    ${meter(info.bars)}
+    ${info.why.length?`<p class="small muted">Why this rating: ${info.why.map(esc).join(' ')}</p>`:''}
+    <h3>How to identify it</h3><p>${esc(tip.id||'See the Mindat page for identification details.')}</p>
+    <h3>Where & how to look</h3><p>${esc(tip.find||'Look where its host rock is exposed: road cuts, washes, cliffs and stream gravels.')}</p>
+    <h3>Quick field tests</h3><ul class="small">
+      <li><b>Hardness:</b> a fingernail is about 2.5, a copper coin about 3.5, a steel knife or glass about 5.5. If the specimen scratches glass, it's harder than 5.5.</li>
+      <li><b>Streak:</b> rub it on the back of an unglazed tile and check the color of the powder.</li>
+      <li><b>Fizz test:</b> a drop of vinegar bubbles slowly on calcite and limestone.</li>
+      <li><b>Magnet:</b> magnetite sticks; hematite and pyrite don't.</li></ul>
+    <p class="small"><a href="https://www.mindat.org/search.php?search=${encodeURIComponent(info.name)}" target="_blank" rel="noopener">More on Mindat</a> · <a href="https://en.wikipedia.org/wiki/${encodeURIComponent(wiki.replace(/ /g,'_'))}" target="_blank" rel="noopener">Wikipedia</a></p>`;
+  document.getElementById('tips').classList.add('open');
+  document.getElementById('tipsSheet').scrollTop=0;
+}
+function closeTips(){document.getElementById('tips').classList.remove('open');}
+document.getElementById('tips').addEventListener('click',e=>{ if(e.target.id==='tips'||e.target.closest('#tipsClose')) closeTips(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeTips(); });
+
 
 /* ---------- Photos: Wikipedia lead images (one batched request) ---------- */
 async function loadImages(titles,my){
