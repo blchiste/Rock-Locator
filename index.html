@@ -201,6 +201,9 @@
   .ilink{background:none;padding:0;color:var(--juniper);font:600 1em var(--body);text-decoration:underline;text-underline-offset:2px}
   ul.where{padding-left:1.1rem;margin:.35rem 0;display:grid;gap:.3rem;font-size:.95rem}
   .findnear{margin-top:.8rem;width:100%;padding:.7rem}
+
+  .mapnote{background:var(--basalt);color:#eef0e6;padding:.4rem .7rem;border-radius:6px;font:600 .95rem var(--cond);display:flex;align-items:center;gap:.5rem;box-shadow:0 1px 3px rgba(0,0,0,.3);margin-top:10px!important}
+  .mapnote .spinner{width:14px;height:14px;border-width:2px;border-color:#4a564f;border-top-color:var(--blaze)}
 </style>
 
 </head>
@@ -979,58 +982,108 @@ async function mineralSearch(q,opts={}){
 
   const pts=[];
   RINGS.forEach(([km,n],ri)=>{ for(let i=0;i<n;i++){ const deg=(360/n)*i+(ri%2?180/n:0); const [la,lo]=km?offset(start.lat,start.lng,km,deg):[start.lat,start.lng]; pts.push({lat:la,lng:lo,ring:ri}); } });
-  const hits=[]; let checked=0, failed=0;
-  const seenUnits=new Map();
-  const update=(done,ringKm)=>{
-    if(run!==mineralRun) return;
-    const head=mineralHead(target,start);
-    const prog= done? '' : `<div class="progress"><div class="bar"><i style="width:${Math.round(checked/pts.length*100)}%"></i></div><span>Checked ${checked} spots, out to ${miles(ringKm)} miles</span></div>`;
-    setPanel(head+prog+mineralList(target,start,hits,done,failed));
-    loadImages([target.key],reqId);
-  };
-  update(false,0);
+  ACTIVE={target,start,run,hits:[],checked:[],failed:0,busy:true,done:false,ringsDone:0,ringKm:0,total:pts.length};
+  renderMineral();
 
   for(let ri=0;ri<RINGS.length;ri++){
-    const ringPts=pts.filter(p=>p.ring===ri);
-    let idx=0;
-    const worker=async()=>{ while(idx<ringPts.length){ const p=ringPts[idx++];
-      try{
-        const units=await fetchUnits(p.lat,p.lng);
-        if(run!==mineralRun) return;
-        const r=units.length?rateTarget(units,target):null;
-        if(r){
-          const unit=units[0].name||units[0].strat_name||'Mapped rock unit';
-          const d=distKm(start.lat,start.lng,p.lat,p.lng);
-          const prev=seenUnits.get(unit);
-          const hit={lat:p.lat,lng:p.lng,km:d,dir:bearing(start.lat,start.lng,p.lat,p.lng),bars:r.bars,why:r.why,unit,unitColor:units[0].color};
-          if(!prev){ seenUnits.set(unit,hit); hits.push(hit); }
-          else if(hit.bars>prev.bars){ Object.assign(prev,hit); }
-        }
-      }catch(e){failed++;}
-      checked++;
-    }};
-    await Promise.all([1,2,3,4,5,6].map(worker));
+    await checkPoints(pts.filter(p=>p.ring===ri),run);
     if(run!==mineralRun) return;
-    drawHits(hits,start);
-    const good=hits.filter(h=>h.bars>=3).length;
-    update(false,RINGS[ri][0]);
-    if(good>=6 && RINGS[ri][0]>=16) break;
+    ACTIVE.ringKm=RINGS[ri][0];
+    drawHits(ACTIVE.hits,start);
+    renderMineral();
+    if(goodHits(ACTIVE.hits).filter(h=>h.bars>=3).length>=6 && RINGS[ri][0]>=16) break;
   }
-  update(true,0);
-  drawHits(hits,start,true);
-  nameHits(hits,run);
+  ACTIVE.done=true;
+  renderMineral();
+  drawHits(ACTIVE.hits,start,true);
+  nameHits(run);
+  setTimeout(()=>{ if(run===mineralRun){ ACTIVE.busy=false; if(ACTIVE.pending){ ACTIVE.pending=false; areaScan(); } } },700);
+}
+
+/* Shared state for the current mineral search */
+let ACTIVE=null;
+async function checkPoints(points,run,onProgress){
+  let idx=0;
+  const worker=async()=>{ while(idx<points.length){ const p=points[idx++];
+    try{
+      const units=await fetchUnits(p.lat,p.lng);
+      if(run!==mineralRun) return;
+      ACTIVE.checked.push([p.lat,p.lng]);
+      const r=units.length?rateTarget(units,ACTIVE.target):null;
+      if(r){
+        const s=ACTIVE.start;
+        ACTIVE.hits.push({lat:p.lat,lng:p.lng,km:distKm(s.lat,s.lng,p.lat,p.lng),dir:bearing(s.lat,s.lng,p.lat,p.lng),
+          bars:r.bars,why:r.why,unit:units[0].name||units[0].strat_name||'Mapped rock unit'});
+      }
+    }catch(e){ if(run===mineralRun) ACTIVE.failed++; }
+    if(onProgress) onProgress();
+  }};
+  await Promise.all([1,2,3,4,5,6].map(worker));
+}
+function renderMineral(){
+  const A=ACTIVE; if(!A) return;
+  const showing=document.querySelector('#panel .mhead');
+  if(!showing && (A.done || backTo)) return;   // user is looking at a spot or a list; don't replace it
+  const prog= A.done? '' : `<div class="progress"><div class="bar"><i style="width:${Math.round(A.checked.length/A.total*100)}%"></i></div><span>Checked ${A.checked.length} spots, out to ${miles(A.ringKm)} miles</span></div>`;
+  const scroll=document.getElementById('panel').scrollTop;
+  setPanel(mineralHead(A.target,A.start)+prog+mineralList(A.target,A.start,A.hits,A.done,A.failed));
+  if(A.done) document.getElementById('panel').scrollTop=scroll;
+  loadImages([A.target.key],reqId);
+}
+
+/* Zooming out or moving the map checks the newly visible area */
+let scanTimer=null;
+map.on('moveend',()=>{ clearTimeout(scanTimer); scanTimer=setTimeout(areaScan,500); });
+map.on('zoomend',()=>{ if(ACTIVE&&ACTIVE.hits.length) drawHits(ACTIVE.hits,ACTIVE.start); });
+async function areaScan(){
+  const A=ACTIVE; if(!A||!A.done) return;
+  if(A.busy){ A.pending=true; return; }
+  const z=map.getZoom();
+  if(z<5){ mapNote('Zoom in a little to check more areas'); return; }
+  const b=map.getBounds(), w=b.getEast()-b.getWest();
+  const step=Math.pow(2,Math.round(Math.log2(w/7)));
+  const c=map.getCenter(), cand=[];
+  for(let la=Math.floor(b.getSouth()/step)*step+step/2; la<b.getNorth(); la+=step)
+    for(let lo=Math.floor(b.getWest()/step)*step+step/2; lo<b.getEast(); lo+=step){
+      if(la<b.getSouth()||lo<b.getWest()) continue;
+      const near=A.checked.some(([a,o])=>Math.abs(a-la)<step*0.4 && Math.abs(o-lo)<step*0.4);
+      if(!near) cand.push({lat:la,lng:lo,d:(la-c.lat)**2+(lo-c.lng)**2});
+    }
+  if(!cand.length) return;
+  cand.sort((x,y)=>x.d-y.d);
+  const pts=cand.slice(0,60), run=A.run, before=A.hits.length;
+  A.busy=true; let n=0;
+  mapNote(`Checking ${pts.length} new spots…`,true);
+  await checkPoints(pts,run,()=>{ n++; if(n%10===0 && run===mineralRun){ mapNote(`Checking new spots: ${n} of ${pts.length}`,true); drawHits(A.hits,A.start); } });
+  if(run!==mineralRun) return;
+  drawHits(A.hits,A.start);
+  const added=A.hits.length-before;
+  mapNote(added?`Added ${added} more ${added===1?'spot':'spots'}`:'No new spots in this area');
+  renderMineral(); nameHits(run);
+  A.busy=false;
+  if(A.pending){ A.pending=false; areaScan(); }
+}
+/* Small status note on the map */
+const Note=L.Control.extend({onAdd(){ const d=L.DomUtil.create('div','mapnote'); d.hidden=true; return d; }});
+const note=new Note({position:'topleft'}); note.addTo(map);
+let noteTimer=null;
+function mapNote(t,keep){
+  const d=note.getContainer(); d.innerHTML=(keep?'<span class="spinner"></span>':'')+esc(t); d.hidden=false;
+  clearTimeout(noteTimer); if(!keep) noteTimer=setTimeout(()=>{d.hidden=true;},2600);
 }
 
 function goodHits(hits){
-  const strong=hits.filter(h=>h.bars>=3);
-  return (strong.length?strong:hits).sort((a,b)=>a.km-b.km||b.bars-a.bars).slice(0,10);
+  const strong=hits.filter(h=>h.bars>=3), pool=(strong.length?strong:hits).slice().sort((a,b)=>a.km-b.km||b.bars-a.bars);
+  const seen=new Set(), out=[];
+  for(const h of pool){ if(seen.has(h.unit)) continue; seen.add(h.unit); out.push(h); if(out.length>=10) break; }
+  return out;
 }
 function mineralHead(target,start){
   const id='img-'+slug(target.key);
   return `${fromExplore?'<button type="button" class="back" data-explore-back="1">Back to the list</button>':''}<div class="mhead">
     <a class="img" id="${id}" href="https://en.wikipedia.org/wiki/${encodeURIComponent(target.key.replace(/ /g,'_'))}" target="_blank" rel="noopener" aria-label="Photo of ${esc(target.label)}"></a>
     <div><h2>${esc(target.label)} near ${start&&start.src==='map'?'the map center':'you'}</h2>
-    <div class="place-sub">${start?`Areas whose mapped rocks commonly hold ${esc(target.label.toLowerCase())}, nearest first.`:''}</div>
+    <div class="place-sub">${start?`Areas whose mapped rocks commonly hold ${esc(target.label.toLowerCase())}, nearest first. Zoom out or move the map to check more areas.`:''}</div>
     <button type="button" class="tipsbtn" data-tips="${esc(target.key)}">Identify and find</button></div></div>
     ${start&&start.src==='map'?`<div class="problem">Location is off, so this search starts from the center of the map. Turn on location for this page, or move the map, then search again.</div>`:''}`;
 }
@@ -1057,17 +1110,25 @@ function mineralList(target,start,hits,done,failed){
         </div>
       </article>`).join('')+`</div>`;
   }
-  const foot = done ? `<div class="note"><p><b>How this works.</b> Rock Finder checked the geology map at ${hits.length?'dozens of':'many'} spots around you and kept the ones whose rocks commonly hold ${esc(target.label.toLowerCase())}. It shows where the right rocks are, not confirmed finds. <a href="https://www.mindat.org/search.php?search=${encodeURIComponent(target.label)}" target="_blank" rel="noopener">See documented finds on Mindat</a>.</p>
+  const foot = done ? `<div class="note"><p><b>How this works.</b> Rock Finder checked the geology map at ${ACTIVE?ACTIVE.checked.length:'many'} spots${ACTIVE&&ACTIVE.hits.length?`, and ${ACTIVE.hits.length} are on the map`:''}. It started around you and kept the ones whose rocks hold ${esc(target.label.toLowerCase())}. It shows where the right rocks are, not confirmed finds. <a href="https://www.mindat.org/search.php?search=${encodeURIComponent(target.label)}" target="_blank" rel="noopener">See documented finds on Mindat</a>.</p>
     <p><b>Before you go,</b> check who owns the land. Collecting is banned in national parks and needs permission on private land.</p>${failed?`<p class="small muted">${failed} spots didn't load and were skipped.</p>`:''}</div>` : '';
   return body+foot;
 }
 function drawHits(hits,start,fit){
   mineralLayer.eachLayer(l=>{ if(l.options && l.options.isHit) mineralLayer.removeLayer(l); });
   const css=getComputedStyle(document.documentElement);
-  // every spot where the mineral could turn up, weakest drawn first so strong ones sit on top
-  [...hits].sort((a,b)=>a.bars-b.bars).forEach(h=>{
+  // Thin out overlapping dots at this zoom: stronger and closer spots win
+  const z=map.getZoom(), scale=Math.max(.6,Math.min(1,(z-4)/6)), gap=16*scale+4;
+  const placed=[];
+  [...hits].sort((a,b)=>b.bars-a.bars||a.km-b.km).forEach(h=>{
+    const pt=map.project([h.lat,h.lng],z);
+    if(placed.some(q=>Math.abs(q.pt.x-pt.x)<gap && Math.abs(q.pt.y-pt.y)<gap)) return;
+    placed.push({h,pt});
+  });
+  // weakest drawn first so strong ones sit on top
+  placed.map(x=>x.h).sort((a,b)=>a.bars-b.bars).forEach(h=>{
     const col=css.getPropertyValue('--l'+h.bars).trim()||'#2f6b4f';
-    L.circleMarker([h.lat,h.lng],{isHit:true,radius:5+h.bars*1.6,color:'#ffffff',weight:2,fillColor:col,fillOpacity:.95})
+    L.circleMarker([h.lat,h.lng],{isHit:true,radius:(5+h.bars*1.6)*scale,color:'#ffffff',weight:2,fillColor:col,fillOpacity:.95})
       .bindTooltip(`${LIKE[h.bars].t}, ${miles(h.km)} mi ${h.km<0.5?'':dirName(h.dir)}<br>${esc(h.unit)}`).on('click',()=>goToHit(h.lat,h.lng)).addTo(mineralLayer);
   });
   showLegend(hits.length>0);
@@ -1082,18 +1143,23 @@ const Legend=L.Control.extend({onAdd(){
   L.DomEvent.disableClickPropagation(d); return d;}});
 const legend=new Legend({position:'bottomleft'}); let legendOn=false;
 function showLegend(on){ if(on&&!legendOn){legend.addTo(map);legendOn=true;} if(!on&&legendOn){map.removeControl(legend);legendOn=false;} }
-async function nameHits(hits,run){
-  const list=goodHits(hits).slice(0,6);
-  for(let i=0;i<list.length;i++){
-    if(run!==mineralRun) return;
-    try{
-      const j=await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${list[i].lat}&lon=${list[i].lng}`)).json();
-      const a=j.address||{};
-      list[i].place='Near '+[a.village||a.town||a.city||a.hamlet||a.county, a.state].filter(Boolean).join(', ');
-      const el=document.getElementById('near-'+i); if(el&&run===mineralRun) el.textContent=list[i].place;
-    }catch(e){}
-    await new Promise(r=>setTimeout(r,1100));   // Nominatim allows 1 request per second
-  }
+let naming=false;
+async function nameHits(run){
+  if(naming) return; naming=true;
+  try{
+    for(const hit of goodHits(ACTIVE.hits).slice(0,6)){
+      if(run!==mineralRun) return;
+      if(hit.place) continue;
+      try{
+        const j=await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${hit.lat}&lon=${hit.lng}`)).json();
+        const a=j.address||{};
+        hit.place='Near '+[a.village||a.town||a.city||a.hamlet||a.county, a.state].filter(Boolean).join(', ');
+        const i=goodHits(ACTIVE.hits).indexOf(hit);
+        const el=document.getElementById('near-'+i); if(el&&run===mineralRun) el.textContent=hit.place;
+      }catch(e){}
+      await new Promise(r=>setTimeout(r,1100));   // Nominatim allows 1 request per second
+    }
+  } finally { naming=false; }
 }
 function goToHit(lat,lng){
   backTo={html:document.getElementById('panel').innerHTML, label:document.querySelector('.mhead h2')?.textContent||'results'};
@@ -1101,10 +1167,10 @@ function goToHit(lat,lng){
   lookup(lat,lng);
 }
 function backHtml(){ return backTo?`<button type="button" class="back" data-back="1">Back to ${esc(backTo.label.replace(/ near .*/,''))} results</button>`:''; }
-function clearMineral(){ mineralRun++; mineralLayer.clearLayers(); backTo=null; showLegend(false); }
+function clearMineral(){ mineralRun++; mineralLayer.clearLayers(); backTo=null; showLegend(false); ACTIVE=null; naming=false; if(typeof note!=='undefined') note.getContainer().hidden=true; }
 document.getElementById('panel').addEventListener('click',e=>{
   const g=e.target.closest('[data-goto]'); if(g && !e.target.closest('a')){ const [la,lo]=g.dataset.goto.split(',').map(Number); goToHit(la,lo); return; }
-  const b=e.target.closest('[data-back]'); if(b&&backTo){ reqId++; setPanel(backTo.html); backTo=null; document.getElementById('panel').scrollTop=0; }
+  const b=e.target.closest('[data-back]'); if(b&&backTo){ reqId++; setPanel(backTo.html); backTo=null; if(ACTIVE&&ACTIVE.done) renderMineral(); document.getElementById('panel').scrollTop=0; }
 });
 
 
