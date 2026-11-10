@@ -145,17 +145,43 @@
   .why{font-size:.88rem;color:var(--muted)}
   .tests{list-style:none;padding:0;margin:.3rem 0;display:grid;gap:.4rem;font-size:.92rem}
   .tests li{padding:.45rem .65rem;background:var(--bg);border-radius:4px}
+
+  /* Search mode switch */
+  .mode{position:relative;display:inline-flex;background:#2c3631;border-radius:6px;padding:3px;margin:0 0 .55rem}
+  .mode button{background:transparent;color:#b9c0ae;padding:.35rem .9rem;font:600 1.02rem var(--cond);border-radius:4px}
+  .mode button[aria-pressed="true"]{background:#eef0e6;color:#1e2622}
+  .brand{margin-bottom:.4rem}
+  /* Mineral search */
+  .mhead{display:grid;grid-template-columns:84px 1fr;gap:.8rem;align-items:start;margin-bottom:.5rem}
+  .mhead .img{display:block;width:84px;height:84px;border-radius:4px;background:var(--line) center/cover no-repeat}
+  .mhead h2{font-size:1.6rem}
+  .mhead .place-sub{margin:.2rem 0 .5rem}
+  .progress{display:flex;flex-direction:column;gap:.35rem;margin:.6rem 0 0;font-size:.9rem;color:var(--muted)}
+  .progress .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+  .progress .bar i{display:block;height:100%;background:var(--juniper);transition:width .3s}
+  .row.hit{grid-template-columns:64px 1fr}
+  .dist{display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);border-radius:4px;height:64px;text-align:center;line-height:1}
+  .dist b{font:700 1.6rem/1 var(--cond)}
+  .dist b:only-child{font-size:1.25rem}
+  .dist span{font-size:.72rem;color:var(--muted);margin-top:.2rem}
+  .back{background:transparent;color:var(--juniper);padding:0;margin-bottom:.6rem;font:600 1rem var(--body)}
+  .back::before{content:"‹ ";}
 </style>
 
 </head>
 <body>
 <header>
   <div class="brand"><h1>Rock Finder</h1><p>What's underfoot, and what you might find in it</p></div>
+  <div class="mode" role="group" aria-label="Search for">
+    <button type="button" data-mode="place" aria-pressed="true">Places</button>
+    <button type="button" data-mode="mineral" aria-pressed="false">Minerals</button>
+  </div>
   <form id="searchForm" role="search">
     <input id="q" type="search" placeholder="Search a place or landmark" aria-label="Search a place" autocomplete="off">
     <button type="submit" class="go">Search</button>
     <button type="button" class="loc" id="locBtn" aria-label="Use my location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
   </form>
+  <datalist id="mineralList"></datalist>
 </header>
 <main>
   <div id="map" aria-label="Map. Tap a spot to see its rocks and minerals."></div>
@@ -164,7 +190,7 @@
       <h2>Pick a spot to explore</h2>
       <p>See which rocks are mapped there, which minerals and crystals turn up in them, and how to spot each one in the field.</p>
       <ol class="howto">
-        <li><b>1</b><span>Search a place, or tap the target button to use where you are.</span></li>
+        <li><b>1</b><span>Search a place, or tap the target button to use where you are. Switch to Minerals to find the nearest areas for a mineral.</span></li>
         <li><b>2</b><span>Tap anywhere on the map to read the ground at that spot.</span></li>
         <li><b>3</b><span>Open a rock or mineral for identification tips and where to look.</span></li>
       </ol>
@@ -510,6 +536,8 @@ map.on('click',e=>lookup(e.latlng.lat,e.latlng.lng));
 document.getElementById('searchForm').addEventListener('submit',async e=>{
   e.preventDefault();
   const q=document.getElementById('q').value.trim(); if(!q) return;
+  if(MODE==='mineral'){ mineralSearch(q); return; }
+  clearMineral();
   setPanel(statusHtml(`Finding “${esc(q)}”…`));
   try{
     const hit=await geocode(q);
@@ -546,37 +574,31 @@ document.getElementById('locBtn').addEventListener('click',()=>{
   if(!navigator.geolocation){setPanel(problemHtml('This browser can\'t share your location. Search a place instead.'));return;}
   setPanel(statusHtml('Finding your location…'));
   navigator.geolocation.getCurrentPosition(p=>{
+    HERE={lat:p.coords.latitude,lng:p.coords.longitude};
+    if(MODE==='mineral'){ const q=document.getElementById('q').value.trim(); if(q){ mineralSearch(q); return; } }
     map.setView([p.coords.latitude,p.coords.longitude],12);
     lookup(p.coords.latitude,p.coords.longitude,'Your location');
   },err=>setPanel(problemHtml(`Location is off or blocked for this page. Allow location access in your browser settings, or search a place instead.`)),{enableHighAccuracy:true,timeout:15000});
 });
 
 /* ---------- Core lookup ---------- */
-async function lookup(lat,lng,label){
-  const my=++reqId;
-  if(marker) marker.setLatLng([lat,lng]); else marker=L.marker([lat,lng]).addTo(map);
-  const where = label ? esc(label) : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-  setPanel(placeHead(where)+statusHtml('Reading the geologic map…'));
-  let units=[];
-  try{
-    const r=await fetch(`https://macrostrat.org/api/v2/geologic_units/map?lat=${lat}&lng=${lng}`);
-    const j=await r.json();
-    units=(j.success&&j.success.data)||[];
-  }catch(err){
-    if(my!==reqId) return;
-    setPanel(placeHead(where)+problemHtml('The geology service didn\'t respond. Check your connection and tap the spot again.'));return;
-  }
-  if(my!==reqId) return;
-  if(!units.length){
-    setPanel(placeHead(where)+problemHtml('No mapped geology at this spot. It may be water or outside map coverage. Tap a nearby spot on land.'));return;
-  }
-  // Prefer most detailed scale first
+/* Fetch map units at a point (cached), most detailed first */
+const UNIT_CACHE=new Map();
+async function fetchUnits(lat,lng){
+  const key=lat.toFixed(3)+','+lng.toFixed(3);
+  if(UNIT_CACHE.has(key)) return UNIT_CACHE.get(key);
+  const r=await fetch(`https://macrostrat.org/api/v2/geologic_units/map?lat=${lat.toFixed(5)}&lng=${lng.toFixed(5)}`);
+  const j=await r.json();
+  let units=(j.success&&j.success.data)||[];
   const order={large:0,medium:1,small:2,tiny:3};
   units.sort((a,b)=>(order[a.scale]??4)-(order[b.scale]??4));
-  // dedupe by name+lith
   const seen=new Set(); units=units.filter(u=>{const k=(u.name||'')+'|'+(u.lith||'');if(seen.has(k))return false;seen.add(k);return true;}).slice(0,4);
+  UNIT_CACHE.set(key,units);
+  return units;
+}
 
-  // ---- Match rock types and rate how much of each is mapped here ----
+/* Turn map units into rated rocks and minerals */
+function analyze(units){
   const found=new Map();
   units.forEach((u,ui)=>{
     const lith=(u.lith||'').toLowerCase();
@@ -600,21 +622,38 @@ async function lookup(lat,lng,label){
       if(!prev||prev.rank>rank) found.set(rk.id,{rock:rk,level,role,ui,rank});
     });
   });
-  const rocks=[...found.values()].sort((a,b)=>a.rank-b.rank).slice(0,6);
-
-  // ---- Minerals: combine rock likelihood with how common the mineral is in that rock ----
+  const allRocks=[...found.values()].sort((a,b)=>a.rank-b.rank);
+  const rocks=allRocks.slice(0,6);
   const ABW={c:3,o:2,r:1}, ABT={c:'Common',o:'Occasional',r:'Rare'};
   const minMap=new Map();
-  rocks.forEach(f=>parseMinerals(f.rock).forEach(([m,a])=>{
-    if(rocks.some(r=>r.rock.wiki===m)) return;
+  allRocks.forEach(f=>parseMinerals(f.rock).forEach(([m,a])=>{
     const s=f.level+ABW[a];
     const why=`${ABT[a]} in ${f.rock.name} (${ROLE_TXT(f)})`;
     const prev=minMap.get(m);
-    if(!prev) minMap.set(m,{name:m,score:s,whys:[why]});
-    else { prev.whys.push(why); if(s>prev.score) {prev.score=s; prev.whys.unshift(prev.whys.pop());} }
+    if(!prev) minMap.set(m,{name:m,score:s,whys:[why],inTop:rocks.includes(f)});
+    else { prev.whys.push(why); prev.inTop=prev.inTop||rocks.includes(f); if(s>prev.score) {prev.score=s; prev.whys.unshift(prev.whys.pop());} }
   }));
-  const minerals=[...minMap.values()].sort((a,b)=>b.score-a.score||b.whys.length-a.whys.length).slice(0,12);
+  const minerals=[...minMap.values()].filter(m=>m.inTop && !rocks.some(r=>r.rock.wiki===m.name))
+    .sort((a,b)=>b.score-a.score||b.whys.length-a.whys.length).slice(0,12);
+  return {rocks,allRocks,minerals,minMap};
+}
 
+async function lookup(lat,lng,label){
+  const my=++reqId;
+  if(marker) marker.setLatLng([lat,lng]); else marker=L.marker([lat,lng]).addTo(map);
+  const where = label ? esc(label) : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  setPanel(backHtml()+placeHead(where)+statusHtml('Reading the geologic map…'));
+  let units=[];
+  try{ units=await fetchUnits(lat,lng); }
+  catch(err){
+    if(my!==reqId) return;
+    setPanel(backHtml()+placeHead(where)+problemHtml('The geology service didn\'t respond. Check your connection and tap the spot again.'));return;
+  }
+  if(my!==reqId) return;
+  if(!units.length){
+    setPanel(backHtml()+placeHead(where)+problemHtml('No mapped geology at this spot. It may be water or outside map coverage. Tap a nearby spot on land.'));return;
+  }
+  const {rocks,minerals}=analyze(units);
   renderResults(where,lat,lng,units,rocks,minerals);
   loadImages([...rocks.map(r=>r.rock.wiki),...minerals.map(m=>m.name)],my);
 }
@@ -664,7 +703,7 @@ function renderResults(where,lat,lng,units,rocks,minerals){
     : `<p class="muted">None of the rocks in the map description match Rock Finder's list yet. The layers above show what's mapped here.</p>`;
   const minHtml = minerals.length? `<div class="list">${minerals.map(m=>card(m.name,MINERAL_LABEL(m.name),'Mineral or crystal',(MINERALS[m.name]||[''])[0],minBars(m.score))).join('')}</div>`:'';
 
-  setPanel(placeHead(where)+`
+  setPanel(backHtml()+placeHead(where)+`
     <div class="quicklinks">
       <a href="https://www.mindat.org/search.php?search=${encodeURIComponent(String(where).split(', ')[0])}" target="_blank" rel="noopener">Collecting sites on Mindat</a>
       <a href="https://ngmdb.usgs.gov/mapview/?center=${lng},${lat}&zoom=12" target="_blank" rel="noopener">USGS geologic maps</a>
@@ -713,7 +752,7 @@ function openTips(wiki){
     <div class="tipbody">
       <div class="kind">${esc(info.tag)}</div>
       <h2>${esc(info.name)}</h2>
-      ${meter(info.bars)}
+      ${info.bars?meter(info.bars):''}
       ${info.why.length?`<p class="why">${info.why.map(esc).join(' ')}</p>`:''}
       <h3>How to recognize it</h3><p>${esc(tip.id||'See its Mindat page for identification details.')}</p>
       <h3>Where to look</h3><p>${esc(tip.find||'Wherever its host rock is exposed: road cuts, washes, cliffs and stream gravels.')}</p>
@@ -747,10 +786,231 @@ document.getElementById('tips').addEventListener('click',e=>{ if(e.target.id==='
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeTips(); });
 
 
+/* ================= Mineral search: nearest areas whose rocks host a mineral ================= */
+let MODE='place', HERE=null, backTo=null, mineralRun=0;
+const mineralLayer=L.layerGroup().addTo(map);
+
+const ALIASES={amethyst:'Quartz','rose quartz':'Quartz','crystal':'Quartz','quartz crystal':'Quartz',citrine:'Quartz',
+  peridot:'Olivine',ruby:'Corundum',sapphire:'Corundum',emerald:'Beryl',aquamarine:'Beryl',jade:'Nephrite',
+  "fool's gold":'Pyrite','fools gold':'Pyrite','desert rose':'Desert rose (crystal)',mica:'Muscovite',feldspar:'Orthoclase',
+  amazonite:'Microcline',salt:'Halite','rock salt':'Halite',flint:'Chert',copper:'Native copper',magnetite:'Magnetite',
+  'black sand':'Magnetite',geodes:'Geode','thunder egg':'Thunderegg',thundereggs:'Thunderegg',celestite:'Celestine (mineral)',
+  barite:'Barite rose',fossils:'Fossil','fairy cross':'Staurolite',schorl:'Tourmaline',onyx:'Agate',carnelian:'Chalcedony'};
+
+/* Everything the app can rate: minerals plus the rocks themselves */
+function catalog(){
+  const items=new Map();
+  Object.keys(MINERALS).forEach(k=>items.set(k,{key:k,label:MINERAL_LABEL(k),isRock:false}));
+  ROCKS.forEach(r=>items.set(r.wiki,{key:r.wiki,label:r.name,isRock:true,rock:r}));
+  return items;
+}
+const CATALOG=catalog();
+(function fillDatalist(){
+  const dl=document.getElementById('mineralList');
+  const labels=[...new Set([...CATALOG.values()].map(i=>i.label).concat(Object.keys(ALIASES).map(a=>a.replace(/\b\w/g,c=>c.toUpperCase()))))].sort();
+  dl.innerHTML=labels.map(l=>`<option value="${esc(l)}"></option>`).join('');
+})();
+function findTarget(q){
+  const n=q.trim().toLowerCase().replace(/\s+/g,' ');
+  if(ALIASES[n]) return CATALOG.get(ALIASES[n]);
+  const cands=[n, n.replace(/(es|s)$/,'')];
+  for(const c of cands) for(const it of CATALOG.values()) if(it.label.toLowerCase()===c||it.key.toLowerCase()===c) return it;
+  for(const c of cands) for(const it of CATALOG.values()) if(it.label.toLowerCase().startsWith(c)) return it;
+  for(const c of cands) if(c.length>=4) for(const it of CATALOG.values()) if(it.label.toLowerCase().includes(c)) return it;
+  return null;
+}
+/* Rating (1–5 bars) for the target at one point, plus the reason */
+function rateTarget(units,target){
+  const {allRocks,minMap}=analyze(units);
+  if(target.isRock){
+    const f=allRocks.find(x=>x.rock.wiki===target.key);
+    return f?{bars:rockBars(f.level),why:`${f.rock.name} is ${ROLE_TXT(f)}`}:null;
+  }
+  const m=minMap.get(target.key);
+  return m?{bars:minBars(m.score),why:m.whys[0]}:null;
+}
+
+function setMode(m){
+  MODE=m;
+  document.querySelectorAll('.mode button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));
+  const q=document.getElementById('q');
+  q.placeholder = m==='mineral' ? 'Search a mineral, like garnet or agate' : 'Search a place or landmark';
+  q.setAttribute('aria-label', m==='mineral' ? 'Search a mineral' : 'Search a place');
+  if(m==='mineral') q.setAttribute('list','mineralList'); else q.removeAttribute('list');
+  document.querySelector('.go').textContent = m==='mineral' ? 'Find nearby' : 'Search';
+  q.value=''; q.focus();
+}
+document.querySelectorAll('.mode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+
+function getHere(){
+  if(HERE) return Promise.resolve({...HERE,src:'you'});
+  return new Promise(res=>{
+    const fallback=()=>{const c=map.getCenter(); res({lat:c.lat,lng:c.lng,src:'map'});};
+    if(!navigator.geolocation) return fallback();
+    navigator.geolocation.getCurrentPosition(p=>{HERE={lat:p.coords.latitude,lng:p.coords.longitude};res({...HERE,src:'you'});},fallback,{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
+  });
+}
+function offset(lat,lng,km,deg){
+  const R=6371, b=deg*Math.PI/180, d=km/R, la=lat*Math.PI/180, lo=lng*Math.PI/180;
+  const la2=Math.asin(Math.sin(la)*Math.cos(d)+Math.cos(la)*Math.sin(d)*Math.cos(b));
+  const lo2=lo+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(la),Math.cos(d)-Math.sin(la)*Math.sin(la2));
+  return [la2*180/Math.PI, lo2*180/Math.PI];
+}
+function distKm(a,b,c,d){const R=6371,t=x=>x*Math.PI/180;const h=Math.sin(t(c-a)/2)**2+Math.cos(t(a))*Math.cos(t(c))*Math.sin(t(d-b)/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+function bearing(a,b,c,d){const t=x=>x*Math.PI/180;const y=Math.sin(t(d-b))*Math.cos(t(c)),x=Math.cos(t(a))*Math.sin(t(c))-Math.sin(t(a))*Math.cos(t(c))*Math.cos(t(d-b));return (Math.atan2(y,x)*180/Math.PI+360)%360;}
+const DIRS=['north','northeast','east','southeast','south','southwest','west','northwest'];
+function dirName(deg){return DIRS[Math.round(deg/45)%8];}
+function miles(km){const m=km*0.621371; return m<10? m.toFixed(1) : Math.round(m);}
+
+/* Rings of sample points around the start, out to ~70 miles */
+const RINGS=[[0,1],[4,6],[9,8],[16,10],[26,12],[40,14],[60,16],[85,18],[112,20]];
+const MAX_MILES=Math.round(112*0.621371);
+
+async function mineralSearch(q){
+  const target=findTarget(q);
+  clearMineral();
+  if(!target){
+    setPanel(`<h2>${esc(q)}</h2>`+problemHtml(`Rock Finder doesn't rate “${esc(q)}” yet. Pick a name from the suggestions, or <a href="https://www.mindat.org/search.php?search=${encodeURIComponent(q)}" target="_blank" rel="noopener">look up documented finds on Mindat</a>.`));
+    return;
+  }
+  const run=++mineralRun; reqId++;
+  INFO[target.key]={name:target.label,tag:target.isRock?target.rock.kind:'Mineral or crystal',bars:0,why:[]};
+  setPanel(mineralHead(target,null)+statusHtml('Finding your location…'));
+  loadImages([target.key],reqId);
+  const start=await getHere();
+  if(run!==mineralRun) return;
+  const startIcon=L.circleMarker([start.lat,start.lng],{radius:8,color:'#1e2622',weight:3,fillColor:'#e3a72f',fillOpacity:1}).bindTooltip(start.src==='you'?'You':'Search center');
+  mineralLayer.addLayer(startIcon);
+  map.setView([start.lat,start.lng],10);
+
+  const pts=[];
+  RINGS.forEach(([km,n],ri)=>{ for(let i=0;i<n;i++){ const deg=(360/n)*i+(ri%2?180/n:0); const [la,lo]=km?offset(start.lat,start.lng,km,deg):[start.lat,start.lng]; pts.push({lat:la,lng:lo,ring:ri}); } });
+  const hits=[]; let checked=0, failed=0;
+  const seenUnits=new Map();
+  const update=(done,ringKm)=>{
+    if(run!==mineralRun) return;
+    const head=mineralHead(target,start);
+    const prog= done? '' : `<div class="progress"><div class="bar"><i style="width:${Math.round(checked/pts.length*100)}%"></i></div><span>Checked ${checked} spots, out to ${miles(ringKm)} miles</span></div>`;
+    setPanel(head+prog+mineralList(target,start,hits,done,failed));
+    loadImages([target.key],reqId);
+  };
+  update(false,0);
+
+  for(let ri=0;ri<RINGS.length;ri++){
+    const ringPts=pts.filter(p=>p.ring===ri);
+    let idx=0;
+    const worker=async()=>{ while(idx<ringPts.length){ const p=ringPts[idx++];
+      try{
+        const units=await fetchUnits(p.lat,p.lng);
+        if(run!==mineralRun) return;
+        const r=units.length?rateTarget(units,target):null;
+        if(r){
+          const unit=units[0].name||units[0].strat_name||'Mapped rock unit';
+          const d=distKm(start.lat,start.lng,p.lat,p.lng);
+          const prev=seenUnits.get(unit);
+          const hit={lat:p.lat,lng:p.lng,km:d,dir:bearing(start.lat,start.lng,p.lat,p.lng),bars:r.bars,why:r.why,unit,unitColor:units[0].color};
+          if(!prev){ seenUnits.set(unit,hit); hits.push(hit); }
+          else if(hit.bars>prev.bars){ Object.assign(prev,hit); }
+        }
+      }catch(e){failed++;}
+      checked++;
+    }};
+    await Promise.all([1,2,3,4,5,6].map(worker));
+    if(run!==mineralRun) return;
+    drawHits(hits,start);
+    const good=hits.filter(h=>h.bars>=3).length;
+    update(false,RINGS[ri][0]);
+    if(good>=6 && RINGS[ri][0]>=16) break;
+  }
+  update(true,0);
+  drawHits(hits,start,true);
+  nameHits(hits,run);
+}
+
+function goodHits(hits){
+  const strong=hits.filter(h=>h.bars>=3);
+  return (strong.length?strong:hits).sort((a,b)=>a.km-b.km||b.bars-a.bars).slice(0,10);
+}
+function mineralHead(target,start){
+  const id='img-'+slug(target.key);
+  return `<div class="mhead">
+    <a class="img" id="${id}" href="https://en.wikipedia.org/wiki/${encodeURIComponent(target.key.replace(/ /g,'_'))}" target="_blank" rel="noopener" aria-label="Photo of ${esc(target.label)}"></a>
+    <div><h2>${esc(target.label)} near ${start&&start.src==='map'?'the map center':'you'}</h2>
+    <div class="place-sub">${start?`Areas whose mapped rocks commonly hold ${esc(target.label.toLowerCase())}, nearest first.`:''}</div>
+    <button type="button" class="tipsbtn" data-tips="${esc(target.key)}">Identify and find</button></div></div>
+    ${start&&start.src==='map'?`<div class="problem">Location is off, so this search starts from the center of the map. Turn on location for this page, or move the map, then search again.</div>`:''}`;
+}
+function mineralList(target,start,hits,done,failed){
+  const list=goodHits(hits);
+  let body='';
+  if(!list.length){
+    body = done
+      ? problemHtml(`No mapped rocks within ${MAX_MILES} miles are known to hold ${esc(target.label.toLowerCase())}. Check <a href="https://www.mindat.org/search.php?search=${encodeURIComponent(target.label)}" target="_blank" rel="noopener">documented finds on Mindat</a>, or move the map somewhere else and search again.`)
+      : '';
+  } else {
+    body=`<h3>${done?'Closest areas':'Closest so far'}</h3><div class="list">`+list.map((h,i)=>`
+      <article class="row hit" style="--lvl:${LIKE[h.bars].c}">
+        <div class="dist">${h.km<0.5?'<b>Here</b>':`<b>${miles(h.km)}</b><span>mi ${dirName(h.dir)}</span>`}</div>
+        <div>
+          <div class="kind" id="near-${i}">${h.place?esc(h.place):'&nbsp;'}</div>
+          <h4 class="nm">${esc(h.unit)}</h4>
+          ${meter(h.bars)}
+          <p>${esc(h.why)}.</p>
+          <div class="actions">
+            <button type="button" class="tipsbtn" data-goto="${h.lat.toFixed(5)},${h.lng.toFixed(5)}">See this spot</button>
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${h.lat.toFixed(5)},${h.lng.toFixed(5)}" target="_blank" rel="noopener">Directions</a>
+          </div>
+        </div>
+      </article>`).join('')+`</div>`;
+  }
+  const foot = done ? `<div class="note"><p><b>How this works.</b> Rock Finder checked the geology map at ${hits.length?'dozens of':'many'} spots around you and kept the ones whose rocks commonly hold ${esc(target.label.toLowerCase())}. It shows where the right rocks are, not confirmed finds. <a href="https://www.mindat.org/search.php?search=${encodeURIComponent(target.label)}" target="_blank" rel="noopener">See documented finds on Mindat</a>.</p>
+    <p><b>Before you go,</b> check who owns the land. Collecting is banned in national parks and needs permission on private land.</p>${failed?`<p class="small muted">${failed} spots didn't load and were skipped.</p>`:''}</div>` : '';
+  return body+foot;
+}
+function drawHits(hits,start,fit){
+  mineralLayer.eachLayer(l=>{ if(l.options && l.options.isHit) mineralLayer.removeLayer(l); });
+  const list=goodHits(hits);
+  const css=getComputedStyle(document.documentElement);
+  list.forEach(h=>{
+    const col=css.getPropertyValue('--l'+h.bars).trim()||'#2f6b4f';
+    L.circleMarker([h.lat,h.lng],{isHit:true,radius:9,color:'#fff',weight:2,fillColor:col,fillOpacity:.95})
+      .bindTooltip(`${miles(h.km)} mi: ${h.unit}`).on('click',()=>goToHit(h.lat,h.lng)).addTo(mineralLayer);
+  });
+  if(fit && list.length){ map.fitBounds(L.latLngBounds([[start.lat,start.lng],...list.map(h=>[h.lat,h.lng])]).pad(0.15)); }
+}
+async function nameHits(hits,run){
+  const list=goodHits(hits).slice(0,6);
+  for(let i=0;i<list.length;i++){
+    if(run!==mineralRun) return;
+    try{
+      const j=await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${list[i].lat}&lon=${list[i].lng}`)).json();
+      const a=j.address||{};
+      list[i].place='Near '+[a.village||a.town||a.city||a.hamlet||a.county, a.state].filter(Boolean).join(', ');
+      const el=document.getElementById('near-'+i); if(el&&run===mineralRun) el.textContent=list[i].place;
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,1100));   // Nominatim allows 1 request per second
+  }
+}
+function goToHit(lat,lng){
+  backTo={html:document.getElementById('panel').innerHTML, label:document.querySelector('.mhead h2')?.textContent||'results'};
+  map.setView([lat,lng],Math.max(map.getZoom(),12));
+  lookup(lat,lng);
+}
+function backHtml(){ return backTo?`<button type="button" class="back" data-back="1">Back to ${esc(backTo.label.replace(/ near .*/,''))} results</button>`:''; }
+function clearMineral(){ mineralRun++; mineralLayer.clearLayers(); backTo=null; }
+document.getElementById('panel').addEventListener('click',e=>{
+  const g=e.target.closest('[data-goto]'); if(g){ const [la,lo]=g.dataset.goto.split(',').map(Number); goToHit(la,lo); return; }
+  const b=e.target.closest('[data-back]'); if(b&&backTo){ reqId++; setPanel(backTo.html); backTo=null; document.getElementById('panel').scrollTop=0; }
+});
+
 /* ---------- Photos: Wikipedia lead images (one batched request) ---------- */
 const PHOTO={};   // wiki title -> photo URL
 async function loadImages(titles,my){
-  titles=[...new Set(titles)];
+  titles=[...new Set(titles)].filter(t=>{
+    if(!PHOTO[t]) return true;
+    const el=document.getElementById('img-'+slug(t)); if(el) el.style.backgroundImage="url('"+PHOTO[t]+"')";
+    return false;
+  });
   for(let i=0;i<titles.length;i+=40){
     const batch=titles.slice(i,i+40);
     try{
