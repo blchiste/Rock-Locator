@@ -192,6 +192,15 @@
     .legend div{min-height:0;gap:.25rem}
     .legend i{transform:scale(.75)}
   }
+
+  /* Expanded where-to-look */
+  .tipbody h4{font:600 1.05rem/1.2 var(--cond);margin:.9rem 0 .35rem;color:var(--muted)}
+  .links-chips{display:flex;flex-wrap:wrap;gap:.4rem}
+  .lchip{display:inline-flex;align-items:baseline;gap:.35rem;background:var(--bg);color:var(--juniper);border:1.5px solid var(--juniper);border-radius:999px;padding:.3rem .7rem;font:600 1rem var(--cond)}
+  .lchip span{font:500 .78rem var(--body);color:var(--muted)}
+  .ilink{background:none;padding:0;color:var(--juniper);font:600 1em var(--body);text-decoration:underline;text-underline-offset:2px}
+  ul.where{padding-left:1.1rem;margin:.35rem 0;display:grid;gap:.3rem;font-size:.95rem}
+  .findnear{margin-top:.8rem;width:100%;padding:.7rem}
 </style>
 
 </head>
@@ -771,19 +780,23 @@ document.getElementById('panel').addEventListener('click',e=>{
 });
 
 /* ---------- Tips pop-out ---------- */
-function openTips(wiki){
-  const info=INFO[wiki]||{name:MINERAL_LABEL(wiki),tag:'',bars:3,why:[]};
+function openTips(wiki,keepStack){
+  if(!keepStack) tipsStack=[];
+  const cat=CATALOG.get(wiki);
+  const info=INFO[wiki]||{name:cat?cat.label:MINERAL_LABEL(wiki),tag:cat?(cat.isRock?cat.rock.kind:'Mineral or crystal'):'',bars:0,why:[]};
   const tip=TIPS[wiki]||{};
   document.getElementById('tipsBody').innerHTML=`
     <a class="tipimg" id="tipImg" href="https://en.wikipedia.org/wiki/${encodeURIComponent(wiki.replace(/ /g,'_'))}" target="_blank" rel="noopener" aria-label="Photo of ${esc(info.name)}"></a>
     <div class="gallery" id="tipGal"></div>
     <div class="tipbody">
+      ${tipsStack.length?`<button type="button" class="back" data-tipsback="1">Back to ${esc((CATALOG.get(tipsStack[tipsStack.length-1])||{label:'previous'}).label)}</button>`:''}
       <div class="kind">${esc(info.tag)}</div>
       <h2>${esc(info.name)}</h2>
       ${info.bars?meter(info.bars):''}
       ${info.why.length?`<p class="why">${info.why.map(esc).join(' ')}</p>`:''}
       <h3>How to recognize it</h3><p>${esc(tip.id||'See its Mindat page for identification details.')}</p>
       <h3>Where to look</h3><p>${esc(tip.find||'Wherever its host rock is exposed: road cuts, washes, cliffs and stream gravels.')}</p>
+      ${whereMore(wiki)}
       <h3>Field tests with everyday gear</h3>
       <ul class="tests">
         <li><b>Hardness.</b> Fingernail 2.5, copper coin 3.5, steel knife or glass 5.5. If it scratches glass, it's harder than 5.5.</li>
@@ -808,9 +821,58 @@ function openTips(wiki){
     g.innerHTML=list.slice(0,6).map(galleryLink).join('');
   }).catch(()=>{});
 }
-let tipsFor=null;
+
+/* ---------- Expanded "Where to look" ---------- */
+const ABN={c:'common',o:'occasional',r:'rare'}, ABO={c:0,o:1,r:2};
+function hostRocks(key){       // rocks that contain this mineral, most common first
+  const out=[];
+  ROCKS.forEach(r=>parseMinerals(r).forEach(([m,a])=>{ if(m===key) out.push({rock:r,a}); }));
+  return out.sort((x,y)=>ABO[x.a]-ABO[y.a]);
+}
+function groupOf(key){
+  const it=CATALOG.get(key); if(it&&it.isRock) return 'Rocks';
+  const g=GROUPS.find(([,keys])=>keys.includes(key)); return g?g[0]:'Rock-forming minerals';
+}
+const HUNT={
+  'Gems and crystals':{how:['Search washes and gravel bars after rain, when stones are clean and colors show.','Walk with the sun ahead of you so translucent stones like agate and quartz light up.','Crack open or closely check rock with holes or cavities; crystals grow into open space.','Follow the source: if pieces show up in a wash, work your way upstream to where they come out of the rock.'],
+    gear:'10x hand lens, rock hammer, safety glasses, gloves, a spray bottle of water to wet stones and bring out color.'},
+  'Metals and ores':{how:['Heavy minerals settle where water slows: inside bends of streams, behind boulders, and in cracks in bedrock.','Pan or sift the gravel and look for the heavy material left at the bottom.','Old mine dumps can hold good specimens. Check that collecting is allowed, and never enter shafts or tunnels.','Rusty or stained rock and quartz veins are signs that metals may be nearby.'],
+    gear:'Gold pan or sieve, magnet (in a plastic bag), hand lens, small shovel, gloves.'},
+  'Fossils and oddities':{how:['Split shale and soft sedimentary rock along its layers with a flat chisel.','Check eroding slopes and gullies after rain, when new material is exposed.','Look at fallen blocks at the base of cliffs rather than climbing.','Note the layer where you find things; finds often repeat along the same layer.'],
+    gear:'Rock hammer, flat chisel, safety glasses, small brush, paper and bags to wrap finds.'},
+  'Rock-forming minerals':{how:['It usually appears as grains inside rock rather than loose crystals. Break a fresh surface and look with a hand lens.','Coarse-grained rocks show it best; fine-grained rock can hide it.','Weathered surfaces hide color, so compare with a freshly broken piece.','Larger crystals often sit in veins, pockets and the coarse edges of rock bodies.'],
+    gear:'10x hand lens, rock hammer, safety glasses, a steel nail and a glass plate for hardness tests.'},
+  'Rocks':{how:['Road cuts and fresh cliff faces show the rock best; weathered rinds hide color and texture.','Stream cobbles show what rocks occur upstream, already rounded and washed.','Compare a fresh broken surface with the weathered outside before deciding what it is.','Note how it breaks, splits or layers; that is often the best clue.'],
+    gear:'Rock hammer, safety glasses, hand lens, and a small bottle of vinegar for the fizz test.'},
+};
+function whereMore(key){
+  const it=CATALOG.get(key); let html='';
+  if(it&&it.isRock){
+    const mins=parseMinerals(it.rock);
+    if(mins.length) html+=`<h4>What to look for in it</h4><div class="links-chips">${mins.map(([m,a])=>`<button type="button" class="lchip" data-tips="${esc(m)}">${esc(MINERAL_LABEL(m))}<span>${ABN[a]}</span></button>`).join('')}</div>`;
+  } else {
+    const hosts=hostRocks(key);
+    if(hosts.length){
+      html+=`<h4>Rocks to look in</h4><div class="links-chips">${hosts.map(x=>`<button type="button" class="lchip" data-tips="${esc(x.rock.wiki)}">${esc(x.rock.name)}<span>${ABN[x.a]}</span></button>`).join('')}</div>`;
+      html+=`<ul class="where">${hosts.slice(0,3).map(x=>{const t=TIPS[x.rock.wiki]; return t?`<li><button type="button" class="ilink" data-tips="${esc(x.rock.wiki)}">${esc(x.rock.name)}</button>: ${esc(t.find)}</li>`:'';}).join('')}</ul>`;
+    }
+  }
+  const hunt=HUNT[groupOf(key)];
+  if(hunt){
+    html+=`<h4>Hunting tips</h4><ul class="where">${hunt.how.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>
+      <p class="small"><b>Bring:</b> ${esc(hunt.gear)}</p>`;
+  }
+  if(it) html+=`<button type="button" class="tipsbtn findnear" data-findnear="${esc(key)}">Find ${esc(it.label.toLowerCase())} near me</button>`;
+  return html;
+}
+let tipsFor=null, tipsStack=[];
 function closeTips(){document.getElementById('tips').classList.remove('open');}
-document.getElementById('tips').addEventListener('click',e=>{ if(e.target.id==='tips'||e.target.closest('#tipsClose')) closeTips(); });
+document.getElementById('tips').addEventListener('click',e=>{
+  if(e.target.id==='tips'||e.target.closest('#tipsClose')){ closeTips(); return; }
+  const t=e.target.closest('[data-tips]'); if(t){ tipsStack.push(tipsFor); openTips(t.dataset.tips,true); return; }
+  const bk=e.target.closest('[data-tipsback]'); if(bk){ const prev=tipsStack.pop(); if(prev) openTips(prev,true); return; }
+  const f=e.target.closest('[data-findnear]'); if(f){ const it=CATALOG.get(f.dataset.findnear); closeTips(); if(it){ if(MODE!=='mineral') setMode('mineral'); document.getElementById('q').value=it.label; mineralSearch(it); if(window.innerWidth<=820) window.scrollTo({top:0,behavior:'smooth'}); } }
+});
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeTips(); });
 
 
