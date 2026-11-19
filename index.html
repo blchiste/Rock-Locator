@@ -224,7 +224,14 @@
   .spot .dist b{font-size:2rem}
   .spot .links-chips{margin:.45rem 0 .1rem}
   .spot .lchip{font-size:.95rem;padding:.2rem .6rem}
-  ul.reasons{font-size:.88rem;margin:.4rem 0 0;gap:.25rem}
+  ul.reasons{font-size:.88rem;margin:.2rem 0 0;gap:.25rem}
+  .spot .ground{font-size:.86rem;margin:.35rem 0 0;color:var(--muted)}
+  .spot .sub{font:600 1rem var(--cond);margin:.55rem 0 0}
+  .finddet{margin-top:.55rem}
+  .finddet summary{cursor:pointer;font:600 1rem/1.25 var(--cond);color:var(--juniper);padding:.3rem 0}
+  .find{background:var(--bg);border-left:3px solid var(--lvl);border-radius:0 4px 4px 0;padding:.5rem .65rem;margin-top:.45rem;font-size:.87rem}
+  .find p{margin:.3rem 0 0}
+  .fhead{display:flex;align-items:center;gap:.5rem;font:600 .95rem var(--cond)}
   .park{font-size:.86rem;margin:.45rem 0 0!important;padding:.35rem .55rem;border-radius:4px;background:var(--bg);border-left:3px solid var(--l3)}
   .park.no{border-left-color:var(--rust);font-weight:600}
   .park.ok{border-left-color:var(--l5)}
@@ -660,7 +667,7 @@ const UNIT_CACHE=new Map();
 async function fetchUnits(lat,lng){
   const key=lat.toFixed(3)+','+lng.toFixed(3);
   if(UNIT_CACHE.has(key)) return UNIT_CACHE.get(key);
-  const r=await fetch(`https://macrostrat.org/api/v2/geologic_units/map?lat=${lat.toFixed(5)}&lng=${lng.toFixed(5)}`);
+  const r=await fetch(`https://macrostrat.org/api/v2/geologic_units/map?lat=${lat.toFixed(5)}&lng=${lng.toFixed(5)}`,{signal:timeoutSignal(9000).signal});
   const j=await r.json();
   let units=(j.success&&j.success.data)||[];
   const order={large:0,medium:1,small:2,tiny:3};
@@ -1342,22 +1349,25 @@ function hexPoints(lat,lng,rKm,target){
 
 /* Streams, mines, quarries and exposed rock from OpenStreetMap */
 const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
-async function overpass(q){
-  for(const u of OVERPASS){
-    try{
-      const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
-      if(r.ok) return await r.json();
-    }catch(e){}
-  }
-  throw new Error('Overpass unavailable');
+function timeoutSignal(ms){ const c=new AbortController(); setTimeout(()=>c.abort(),ms); return c; }
+/* Ask both Overpass servers at once, take the first good answer, give up after ms */
+async function overpass(q,ms=10000){
+  const ctl=timeoutSignal(ms);
+  const one=async u=>{
+    const r=await fetch(u,{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  };
+  try{ const j=await Promise.any(OVERPASS.map(one)); ctl.abort(); return j; }
+  catch(e){ throw new Error('Overpass unavailable'); }
 }
 async function fetchFeatures(lat,lng,rKm){
   const a=`(around:${Math.round(rKm*1000+500)},${lat.toFixed(5)},${lng.toFixed(5)})`;
-  const j=await overpass(`[out:json][timeout:25];(
+  const j=await overpass(`[out:json][timeout:10];(
     way["waterway"~"^(river|stream|wadi)$"]${a};
     nwr["landuse"="quarry"]${a}; nwr["historic"="mine"]${a}; nwr["man_made"~"^(mineshaft|adit)$"]${a}; nwr["industrial"="mine"]${a};
     nw["natural"~"^(cliff|bare_rock|scree|rock)$"]${a}; nw["geological"="outcrop"]${a};
-  );out geom qt 2500;`);
+  );out geom qt 1500;`,10000);
   const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.574;
   const P=(la,lo)=>[(lo-lng)*kx,(la-lat)*ky];
   const out={streams:[],mines:[],rock:[]};
@@ -1428,15 +1438,85 @@ function scoreSample(s){
   const vals=[...a.minMap.values()].map(m=>{ const b=minBars(m.score); return {m,b,v:prize(m.name)*b*b/25}; }).sort((x,y)=>y.v-x.v);
   s.value=vals.slice(0,4).reduce((t,x)=>t+x.v,0);
   const gems=vals.filter(x=>prize(x.m.name)>=.6 && x.b>=2);
-  s.finds=(gems.length?gems:vals).slice(0,4).map(x=>x.m.name);
+  const top=(gems.length?gems:vals).slice(0,4);
+  s.finds=top.map(x=>x.m.name);
+  s.findInfo=top.map(x=>({key:x.m.name,bars:x.b,whys:x.m.whys}));
   s.reasons=[];
   // productive rock types
   let hot=null;
-  a.rocks.forEach(f=>{ const h=HOT_ROCKS[f.rock.id]; if(!h||f.level<2) return; const v=h[0]*rockBars(f.level)/5; if(!hot||v>hot.v) hot={v,txt:h[1]}; });
+  a.rocks.forEach(f=>{ const h=HOT_ROCKS[f.rock.id]; if(!h||f.level<2) return; const v=h[0]*rockBars(f.level)/5; if(!hot||v>hot.v) hot={v,txt:h[1],id:f.rock.id}; });
+  s.hotId=hot?hot.id:null;
   s.hot=hot?hot.v:0; if(hot) s.reasons.push(hot.txt);
   s.main=new Set(a.rocks.filter(f=>f.level>=2).map(f=>f.rock.id));
   if(!s.main.size && a.rocks[0]) s.main.add(a.rocks[0].rock.id);
   s.unitKey=(s.units[0].name||s.units[0].strat_name||s.units[0].lith||'')+'';
+}
+/* ---------- Why each find could be at a spot, and how to find it there ---------- */
+const TRAIT={
+  heavy:new Set(['Gold','Garnet','Magnetite','Zircon','Corundum','Galena','Chromite','Native copper','Hematite','Titanite']),
+  hard:new Set(['Agate','Jasper','Chalcedony','Quartz','Smoky quartz','Amethyst','Petrified wood','Topaz','Beryl','Tourmaline','Corundum','Garnet','Nephrite','Jadeite',"Tiger's eye",'Labradorite','Olivine']),
+  ore:new Set(['Gold','Galena','Sphalerite','Pyrite','Marcasite','Fluorite','Native copper','Magnetite','Chromite','Quartz','Smoky quartz','Amethyst','Barite rose','Calcite']),
+  skarn:new Set(['Garnet','Epidote','Vesuvianite','Wollastonite','Magnetite','Fluorite','Sphalerite','Galena','Calcite']),
+  pocket:new Set(['Tourmaline','Beryl','Topaz','Smoky quartz','Microcline','Quartz','Apatite','Garnet']),
+  cavity:new Set(['Agate','Chalcedony','Zeolite','Native copper','Opal','Thunderegg','Topaz','Calcite','Amethyst','Geode','Celestine (mineral)']),
+  layered:new Set(['Fossil','Concretion','Selenite','Pyrite','Marcasite','Petrified wood','Geode']),
+};
+const ABUND={Common:'common',Occasional:'found now and then',Rare:'rare but possible'};
+function whyText(key,whys){
+  const lab=MINERAL_LABEL(key);
+  const parse=w=>{ const m=/^(Common|Occasional|Rare) in (.+?) \((.+)\)$/.exec(w); return m?{ab:m[1],rock:m[2],role:m[3]}:null; };
+  const first=parse(whys[0]||'');
+  if(!first) return esc(whys[0]||'');
+  let t=`${lab} is ${ABUND[first.ab]} in ${first.rock.toLowerCase()}, and ${first.rock.toLowerCase()} is ${first.role.replace('mapped here','mapped at this spot')}.`;
+  const more=[...new Set(whys.slice(1).map(parse).filter(Boolean).map(x=>x.rock.toLowerCase()))].filter(r=>r!==first.rock.toLowerCase());
+  if(more.length) t+=` It can also come from the ${more.slice(0,2).join(' and ')} here.`;
+  return esc(t);
+}
+function huntTips(s,key,seen){
+  const out=[], host=s.a.allRocks.map(f=>f.rock.id);
+  const add=(id,full,short)=>{ if(seen.has(id)){ if(short) out.push(short); } else { seen.add(id); out.push(full); } };
+  if(s.stream){
+    const nm=esc(s.stream.name), where=s.stream.d<0.05?nm:`${nm} (${fmtDist(s.stream.d)} away)`;
+    if(TRAIT.heavy.has(key)) add('heavy',`It's heavy, so ${where} sorts it out of lighter sand. Dig on the inside of bends, behind boulders and in cracks in the bedrock, then pan or sieve the fine gravel.`,`It's heavy too, so pan the same spots along ${nm}.`);
+    else if(TRAIT.hard.has(key)) add('hard',`It's hard enough to survive tumbling downstream, so walk the gravel bars of ${where} looking for rounded pieces. Wet them to bring out the color.`,`It also survives as rounded pebbles on the gravel bars of ${nm}.`);
+  }
+  if(s.mine && (TRAIT.ore.has(key)||TRAIT.skarn.has(key)||TRAIT.pocket.has(key))){
+    const nm=s.mine.name?esc(s.mine.name):(s.mine.quarry?'the quarry':'the old mine');
+    add('mine', s.mine.quarry
+      ? `${nm} (${fmtDist(s.mine.d)} away) cuts fresh rock. With permission, check broken faces and spoil piles for it.`
+      : `Miners at ${nm} (${fmtDist(s.mine.d)} away) dug through the rock that holds it. Search the waste dumps for broken pieces with fresh faces.`,
+      `Check the ${s.mine.quarry?'spoil piles at':'dumps at'} ${nm} for it too.`);
+  }
+  if(s.contactInfo){
+    if(s.contactInfo.kind==='skarn' && TRAIT.skarn.has(key)) add('skarn',`The ${s.contactInfo.a}–${s.contactInfo.b} contact nearby is exactly where it forms: hot fluids from the ${s.contactInfo.a} reacted with the ${s.contactInfo.b}. Look for heavy, colorful rock along the boundary.`,`It forms along the same ${s.contactInfo.a}–${s.contactInfo.b} contact.`);
+    else if(TRAIT.ore.has(key)) add('vein',`Veins tend to run along the edge between ${s.contactInfo.a} and ${s.contactInfo.b}. Follow white quartz veins and rusty stained rock.`,`Follow the same veins along the ${s.contactInfo.a}–${s.contactInfo.b} edge.`);
+  }
+  if(s.hotId==='pegmatite' && TRAIT.pocket.has(key)) add('pocket',`In pegmatite the best crystals grow in pockets. Look for open cavities or clay-filled holes, and for crystal pieces in the soil just below outcrops.`,`Like the others, it grows best in pegmatite pockets.`);
+  if(TRAIT.cavity.has(key) && host.some(id=>['basalt','rhyolite','tuff','scoria','andesite','limestone','dolostone'].includes(id))) add('cavity',`It fills holes and cavities in the rock. Look for round nodules weathering out onto slopes and into washes.`,`It also fills cavities, so crack open nodules you find.`);
+  if(TRAIT.layered.has(key) && host.some(id=>['shale','siltstone','limestone','sandstone','coal','tuff','evaporite'].includes(id))) add('layer',`It sits in the rock layers. Check eroding slopes and gullies after rain, and split loose slabs along their layers.`,`Look in the same layers and gullies.`);
+  if(s.expo) add('expo',`The ${s.expo.what} ${s.expo.d<0.05?'here':`${fmtDist(s.expo.d)} away`} show${s.expo.what==='cliffs'?'':'s'} fresh rock. Check fallen blocks at the base instead of climbing.`,null);
+  const t=TIPS[key];
+  if(!out.length || out.every(x=>x.length<80)) out.push(t?`Other places it turns up: ${esc(t.find.charAt(0).toLowerCase()+t.find.slice(1))}`:'Look wherever its host rock is exposed: road cuts, washes and stream gravel.');
+  return out.slice(0,3);
+}
+function findHtml(s,f,seen){
+  const tip=TIPS[f.key];
+  return `<div class="find" style="--lvl:${LIKE[f.bars].c}">
+    <div class="fhead"><button type="button" class="lchip" data-tips="${esc(f.key)}">${esc(MINERAL_LABEL(f.key))}</button><span style="color:${LIKE[f.bars].c}">${LIKE[f.bars].t}</span></div>
+    <p><b>Why it could be here.</b> ${whyText(f.key,f.whys)}</p>
+    <p><b>Where to look.</b> ${huntTips(s,f.key,seen).join(' ')}</p>
+    ${tip?`<p><b>How to spot it.</b> ${esc(spotText(tip.id))}</p>`:''}
+  </div>`;
+}
+function spotText(id){   // "Like orthoclase; …" → include orthoclase's own description
+  const m=/^Like (\w+)/.exec(id), ref=m&&TIPS[m[1].charAt(0).toUpperCase()+m[1].slice(1)];
+  return ref? `${ref.id} ${id.replace(/^Like \w+;?\s*/,'').replace(/^./,c=>c.toUpperCase())}` : id;
+}
+function groundText(u){
+  if(!u) return '';
+  const lith=(u.lith||'').replace(/Major:\{([^}]*)\}/i,'mostly $1').replace(/Minor:\{([^}]*)\}/i,'with some $1').replace(/\},?\s*with/,'; with').replace(/,\s*;/,';');
+  const age=u.b_int_age!=null?`, about ${fmtAge(u.b_int_age)} old`:'';
+  return lith?`${lith.charAt(0).toUpperCase()+lith.slice(1)}${age}.`:'';
 }
 function rockName(id){ const r=ROCKS.find(x=>x.id===id); return r?r.name.split(' / ')[0].replace(/ \(.*\)/,'').toLowerCase():id; }
 
@@ -1449,10 +1529,10 @@ function scoreArea(samples,spacing,feats){
       if(o===s || Math.hypot(o.x-s.x,o.y-s.y)>spacing*1.3) continue;
       if(o.unitKey===s.unitKey || [...o.main].some(id=>s.main.has(id))) continue;
       const ign=[...s.main,...o.main].find(id=>INTRUSIVE.has(id)), carb=[...s.main,...o.main].find(id=>CARBONATE.has(id));
-      if(ign&&carb&&s.contact<1.2){ s.contact=1.2; s.contactTxt=`Near where ${rockName(ign)} meets ${rockName(carb)}. Contacts like this can form skarn, with garnet, epidote and ore minerals`; }
+      if(ign&&carb&&s.contact<1.2){ s.contact=1.2; s.contactInfo={kind:'skarn',a:rockName(ign),b:rockName(carb)}; s.contactTxt=`Near where ${rockName(ign)} meets ${rockName(carb)}. Contacts like this can form skarn, with garnet, epidote and ore minerals`; }
       else if(s.contact<.45){
         const A=[...s.main][0], B=[...o.main][0];
-        s.contact=.45; s.contactTxt=A&&B?`On the edge between ${rockName(A)} and ${rockName(B)}. Veins and mineral pockets often form where rock types meet`:`On the edge between two rock units, where veins and mineral pockets often form`;
+        s.contact=.45; s.contactInfo={kind:'edge',a:A?rockName(A):'one rock',b:B?rockName(B):'another'}; s.contactTxt=A&&B?`On the edge between ${rockName(A)} and ${rockName(B)}. Veins and mineral pockets often form where rock types meet`:`On the edge between two rock units, where veins and mineral pockets often form`;
       }
     }
     if(s.contact) s.reasons.push(s.contactTxt);
@@ -1465,6 +1545,7 @@ function scoreArea(samples,spacing,feats){
     if(st&&st.d<0.35){
       s.geo+=st.d<0.15?.9:.6;
       const t=st.f.tags, dry=t.intermittent==='yes'||t.waterway==='wadi';
+      s.stream={d:st.d,name:st.f.name||(dry?'the dry wash':'the stream'),dry};
       s.reasons.push(`${st.f.name||(dry?'A dry wash':'A stream')} ${st.d<0.05?'runs right here':`is ${fmtDist(st.d)} away`}. Check gravel bars and inside bends, where water drops hard, heavy stones`);
     }
     const mn=nearest(s.x,s.y,feats.mines);
@@ -1472,12 +1553,13 @@ function scoreArea(samples,spacing,feats){
       s.geo+=mn.d<0.4?1:.6;
       const t=mn.f.tags, q=t.landuse==='quarry';
       s.reasons.push(`${q?'A quarry':'An old mine'}${mn.f.name?` (${mn.f.name})`:''} is ${fmtDist(mn.d)} away. ${q?'Quarries are usually private and may be active, so ask before entering.':'Dumps and tailings often hold specimens. Stay out of shafts and tunnels, and get permission first.'}`);
-      s.mine=true;
+      s.mine={d:mn.d,name:mn.f.name,quarry:q};
     }
     const rk=nearest(s.x,s.y,feats.rock);
     if(rk&&rk.d<0.3){
       s.geo+=.45;
       const n=rk.f.tags.natural;
+      s.expo={d:rk.d,what:n==='cliff'?'cliffs':n==='scree'?'scree slope':'exposed rock'};
       s.reasons.push(`${n==='cliff'?'Cliffs':n==='scree'?'A scree slope':'Exposed rock'} ${rk.d<0.05?'right here':`${fmtDist(rk.d)} away`}, so bedrock shows instead of hiding under soil`);
     }
   });
@@ -1500,9 +1582,9 @@ function pickSpots(samples,rKm,n){
 
 /* Is a spot inside a park, refuge or reserve? One Overpass query for several spots. */
 async function checkParks(spots){
-  const q='[out:json][timeout:20];'+spots.map((s,i)=>
+  const q='[out:json][timeout:6];'+spots.map((s,i)=>
     `is_in(${s.lat.toFixed(5)},${s.lng.toFixed(5)})->.a${i};(area.a${i}["boundary"~"^(national_park|protected_area|aboriginal_lands)$"];area.a${i}["leisure"="nature_reserve"];);make spot ix="${i}",names=set(t["name"]),bnd=set(t["boundary"]),cls=set(t["protect_class"]),lei=set(t["leisure"]);out;`).join('');
-  const j=await overpass(q);
+  const j=await overpass(q,6000);
   (j.elements||[]).forEach(el=>{ const t=el.tags||{}, s=spots[+t.ix]; if(s) s.park=parkVerdict(t); });
   spots.forEach(s=>{ if(s.park===undefined) s.park=null; });
 }
@@ -1525,7 +1607,7 @@ async function huntArea(){
   if(!AREA.pin) return;
   const run=++AREA.run, {lat,lng}=AREA.pin, rKm=AREA.radiusMi*1.609344;
   backTo=null; clearHuntMarks(); reqId++;
-  const {pts,spacing}=hexPoints(lat,lng,rKm,80);
+  const {pts,spacing}=hexPoints(lat,lng,rKm,48);
   const head=`<div class="hunttop"><h2>Best spots to hunt</h2></div><div class="place-sub">Within ${fmtMi(AREA.radiusMi)} of ${esc(pinLabel())}</div>`;
   const prog=(n,t)=>`<div class="progress"><div class="bar"><i style="width:${Math.round(n/pts.length*100)}%"></i></div><span>${t}</span></div>`;
   setPanel(head+prog(0,'Reading the geologic map…'));
@@ -1539,7 +1621,7 @@ async function huntArea(){
     done++;
     if(run===AREA.run && (done%4===0||done===pts.length)) setPanel(head+prog(done,`Checked the geology at ${done} of ${pts.length} spots`));
   }};
-  await Promise.all([1,2,3,4,5,6].map(worker));
+  await Promise.all([1,2,3,4,5,6,7,8].map(worker));
   if(run!==AREA.run) return;
   if(!samples.length){
     setPanel(head+problemHtml(failed?'The geology service didn\'t respond. Check your connection and try again.':'No mapped geology in this circle. It may be water or outside map coverage. Move the pin onto land.')
@@ -1554,17 +1636,14 @@ async function huntArea(){
 
   // Pick spots, then check parks; repeat if a banned spot dropped out
   setPanel(head+prog(pts.length,'Checking parks and reserves…'));
-  let spots=[], parksOk=true;
-  for(let round=0;round<3;round++){
-    spots=pickSpots(samples,rKm,5);
-    const unchecked=spots.filter(s=>s.park===undefined);
-    if(!unchecked.length) break;
-    try{ await checkParks(unchecked); }catch(e){ parksOk=false; break; }
+  let parksOk=!!feats;                 // if OpenStreetMap just timed out, don't wait on it again
+  const cands=pickSpots(samples,rKm,8);
+  if(cands.length && feats){
+    try{ await checkParks(cands); }catch(e){ parksOk=false; }
     if(run!==AREA.run) return;
-    unchecked.forEach(s=>{ s.adj=s.score*PARK_W[s.park?s.park.level:'none']; });
+    cands.forEach(s=>{ s.adj=s.score*PARK_W[s.park?s.park.level:'none']; });
   }
-  if(run!==AREA.run) return;
-  spots=pickSpots(samples,rKm,5);
+  const spots=pickSpots(samples,rKm,5);
   spots.forEach(s=>{ s.km=distKm(lat,lng,s.lat,s.lng); s.dir=bearing(lat,lng,s.lat,s.lng); });
 
   // What the circle is made of
@@ -1608,8 +1687,9 @@ function renderHunt(res){
         <div class="kind" id="spotname-${i}">${s.placeName?esc(s.placeName):'&nbsp;'}</div>
         <h4 class="nm">${esc(s.unitKey||'Mapped rock unit')}</h4>
         ${meter(s.bars)}
-        ${s.finds.length?`<div class="links-chips">${s.finds.map(k=>`<button type="button" class="lchip" data-tips="${esc(k)}">${esc(MINERAL_LABEL(k))}</button>`).join('')}</div>`:''}
-        ${s.reasons.length?`<ul class="where reasons">${s.reasons.slice(0,4).map(r=>`<li>${esc(/[.!?]$/.test(r)?r:r+'.')}</li>`).join('')}</ul>`:''}
+        ${groundText(s.units[0])?`<p class="ground"><b>The ground:</b> ${esc(groundText(s.units[0]))}</p>`:''}
+        ${s.reasons.length?`<div class="sub">Why this spot</div><ul class="where reasons">${s.reasons.slice(0,4).map(r=>`<li>${esc(/[.!?]$/.test(r)?r:r+'.')}</li>`).join('')}</ul>`:''}
+        ${s.findInfo.length?`<details class="finddet"${i===0?' open':''}><summary>What to look for here (${s.findInfo.map(f=>esc(MINERAL_LABEL(f.key))).join(', ')})</summary>${(seen=>s.findInfo.map(f=>findHtml(s,f,seen)).join(''))(new Set())}</details>`:''}
         ${s.park&&s.park.text?`<p class="park ${s.park.level}">${esc(s.park.text)}</p>`:''}
         <div class="actions">
           <button type="button" class="tipsbtn" data-hunt="spot" data-i="${i}">See this spot</button>
