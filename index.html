@@ -204,6 +204,35 @@
 
   .mapnote{background:var(--basalt);color:#eef0e6;padding:.4rem .7rem;border-radius:6px;font:600 .95rem var(--cond);display:flex;align-items:center;gap:.5rem;box-shadow:0 1px 3px rgba(0,0,0,.3);margin-top:10px!important}
   .mapnote .spinner{width:14px;height:14px;border-width:2px;border-color:#4a564f;border-top-color:var(--blaze)}
+
+  /* Hunt area */
+  .huntpin span{position:relative;display:block;width:26px;height:26px;margin:2px;border-radius:50% 50% 50% 0;background:var(--blaze);border:3px solid #1e2622;transform:rotate(-45deg);box-shadow:0 2px 4px rgba(0,0,0,.35)}
+  .huntpin span::after{content:"";position:absolute;left:6px;top:6px;width:8px;height:8px;border-radius:50%;background:#1e2622}
+  .rankpin{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--basalt);color:var(--blaze);border:3px solid #fff;font:700 1.05rem/1 var(--cond);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+  .radius{background:var(--card);border-radius:6px;padding:.75rem .9rem .6rem;margin:.8rem 0}
+  .radius label{display:flex;justify-content:space-between;align-items:baseline;font:600 1.15rem var(--cond)}
+  .radius output{font:700 1.5rem var(--cond);color:var(--juniper)}
+  .radius input{width:100%;accent-color:var(--juniper);margin:.5rem 0 .1rem;height:28px}
+  .radius .ticks{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted)}
+  .hunting .legend .you-row{display:none}
+  @media (max-width:400px){.mode button{padding:.35rem .62rem}}
+  .huntgo{width:100%;padding:.8rem;font-size:1.05rem}
+  .hunttop{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+  .hunttop .back{margin:0}
+  .hunttop .back::before{content:"";}
+  .spot{grid-template-columns:64px 1fr}
+  .spot .dist b{font-size:2rem}
+  .spot .links-chips{margin:.45rem 0 .1rem}
+  .spot .lchip{font-size:.95rem;padding:.2rem .6rem}
+  ul.reasons{font-size:.88rem;margin:.4rem 0 0;gap:.25rem}
+  .park{font-size:.86rem;margin:.45rem 0 0!important;padding:.35rem .55rem;border-radius:4px;background:var(--bg);border-left:3px solid var(--l3)}
+  .park.no{border-left-color:var(--rust);font-weight:600}
+  .park.ok{border-left-color:var(--l5)}
+  .shares{display:grid;gap:.35rem;font-size:.9rem}
+  .share{display:grid;grid-template-columns:minmax(0,9.5rem) 1fr 2.6rem;gap:.5rem;align-items:center}
+  .share span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .share i{display:block;height:8px;border-radius:4px;background:var(--juniper);min-width:3px}
+  .share b{text-align:right;font:600 .95rem var(--cond)}
 </style>
 
 </head>
@@ -214,6 +243,7 @@
     <button type="button" data-mode="place" aria-pressed="true">Places</button>
     <button type="button" data-mode="mineral" aria-pressed="false">Minerals</button>
     <button type="button" data-mode="explore" aria-pressed="false">Explore</button>
+    <button type="button" data-mode="area" aria-pressed="false">Hunt</button>
   </div>
   <form id="searchForm" role="search">
     <input id="q" type="search" placeholder="Search a place or landmark" aria-label="Search a place" autocomplete="off">
@@ -232,6 +262,7 @@
         <li><b>1</b><span>Search a place, or tap the target button to use where you are. Switch to Minerals or Explore to find the nearest areas for a mineral.</span></li>
         <li><b>2</b><span>Tap anywhere on the map to read the ground at that spot.</span></li>
         <li><b>3</b><span>Open a rock or mineral for identification tips and where to look.</span></li>
+        <li><b>4</b><span>Planning a trip? Switch to Hunt, drop a pin and pick a radius to get the best spots to search in that area.</span></li>
       </ol>
       <p class="credits">Geology from Macrostrat (CC-BY 4.0). Photos from Wikipedia and Wikimedia Commons.</p>
     </div>
@@ -569,7 +600,7 @@ const Ctl = L.Control.extend({onAdd(){
 map.addControl(new Ctl({position:'topright'}));
 
 let marker=null, reqId=0;
-map.on('click',e=>lookup(e.latlng.lat,e.latlng.lng));
+map.on('click',e=>{ if(MODE==='area') areaTap(e.latlng); else lookup(e.latlng.lat,e.latlng.lng); });
 
 /* ---------- Search & location ---------- */
 document.getElementById('searchForm').addEventListener('submit',async e=>{
@@ -577,6 +608,7 @@ document.getElementById('searchForm').addEventListener('submit',async e=>{
   const q=document.getElementById('q').value.trim(); if(!q) return;
   if(MODE==='explore'){ filterExplore(); return; }
   if(MODE==='mineral'){ mineralSearch(q); return; }
+  if(MODE==='area'){ areaSearch(q); return; }
   clearMineral();
   setPanel(statusHtml(`Finding “${esc(q)}”…`));
   try{
@@ -616,6 +648,7 @@ document.getElementById('locBtn').addEventListener('click',()=>{
   navigator.geolocation.getCurrentPosition(p=>{
     HERE={lat:p.coords.latitude,lng:p.coords.longitude};
     if(MODE==='mineral'){ const q=document.getElementById('q').value.trim(); if(q){ mineralSearch(q); return; } }
+    if(MODE==='area'){ map.setView([p.coords.latitude,p.coords.longitude],13); placePin(p.coords.latitude,p.coords.longitude); return; }
     map.setView([p.coords.latitude,p.coords.longitude],12);
     lookup(p.coords.latitude,p.coords.longitude,'Your location');
   },err=>setPanel(problemHtml(`Location is off or blocked for this page. Allow location access in your browser settings, or search a place instead.`)),{enableHighAccuracy:true,timeout:15000});
@@ -924,16 +957,20 @@ function rateTarget(units,target){
 }
 
 function setMode(m){
+  if(MODE==='area' && m!=='area') clearArea();
   MODE=m;
+  document.body.classList.toggle('hunting',m==='area');
   document.querySelectorAll('.mode button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));
   const q=document.getElementById('q');
-  q.placeholder = m==='mineral' ? 'Search a mineral, like garnet or agate' : m==='explore' ? 'Filter the list' : 'Search a place or landmark';
+  q.placeholder = m==='mineral' ? 'Search a mineral, like garnet or agate' : m==='explore' ? 'Filter the list' : m==='area' ? 'Search where you want to hunt' : 'Search a place or landmark';
   q.setAttribute('aria-label', m==='mineral' ? 'Search a mineral' : m==='explore' ? 'Filter the list' : 'Search a place');
   if(m==='mineral') q.setAttribute('list','mineralList'); else q.removeAttribute('list');
   document.querySelector('.go').textContent = m==='mineral' ? 'Find nearby' : 'Search';
   document.querySelector('.go').hidden = m==='explore';
   q.value='';
-  if(m==='explore'){ showExplore(); } else q.focus();
+  if(m==='explore'){ showExplore(); }
+  else if(m==='area'){ startArea(); }
+  else q.focus();
 }
 document.querySelectorAll('.mode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
 
@@ -1139,7 +1176,7 @@ function drawHits(hits,start,fit){
 /* Map key for the rating colors */
 const Legend=L.Control.extend({onAdd(){
   const d=L.DomUtil.create('div','legend');
-  d.innerHTML='<div class="lt">Chance of finding it</div>'+[5,4,3,2,1].map(n=>`<div><i style="background:var(--l${n});width:${8+n*2}px;height:${8+n*2}px"></i>${LIKE[n].t}</div>`).join('')+'<div><i class="you"></i>You</div>';
+  d.innerHTML='<div class="lt">Chance of finding it</div>'+[5,4,3,2,1].map(n=>`<div><i style="background:var(--l${n});width:${8+n*2}px;height:${8+n*2}px"></i>${LIKE[n].t}</div>`).join('')+'<div class="you-row"><i class="you"></i>You</div>';
   L.DomEvent.disableClickPropagation(d); return d;}});
 const legend=new Legend({position:'bottomleft'}); let legendOn=false;
 function showLegend(on){ if(on&&!legendOn){legend.addTo(map);legendOn=true;} if(!on&&legendOn){map.removeControl(legend);legendOn=false;} }
@@ -1162,7 +1199,7 @@ async function nameHits(run){
   } finally { naming=false; }
 }
 function goToHit(lat,lng){
-  backTo={html:document.getElementById('panel').innerHTML, label:document.querySelector('.mhead h2')?.textContent||'results'};
+  backTo={html:document.getElementById('panel').innerHTML, label:MODE==='area'?'hunt area':(document.querySelector('.mhead h2')?.textContent||'results')};
   map.setView([lat,lng],Math.max(map.getZoom(),12));
   lookup(lat,lng);
 }
@@ -1172,6 +1209,440 @@ document.getElementById('panel').addEventListener('click',e=>{
   const g=e.target.closest('[data-goto]'); if(g && !e.target.closest('a')){ const [la,lo]=g.dataset.goto.split(',').map(Number); goToHit(la,lo); return; }
   const b=e.target.closest('[data-back]'); if(b&&backTo){ reqId++; setPanel(backTo.html); backTo=null; if(ACTIVE&&ACTIVE.done) renderMineral(); document.getElementById('panel').scrollTop=0; }
 });
+
+
+/* ================= Hunt area: drop a pin, pick a radius, rank the best spots inside it ================= */
+const MIN_PIN_ZOOM=11;
+const RADII=[0.5,1,2,3,5,8,12,20];          // miles
+const areaLayer=L.layerGroup().addTo(map);
+const AREA={pin:null,circle:null,radiusMi:3,run:0,result:null,place:null};
+const pinIcon=L.divIcon({className:'huntpin',html:'<span></span>',iconSize:[30,36],iconAnchor:[15,35]});
+
+function fmtMi(mi){ return `${mi} ${mi===1?'mile':'miles'}`; }
+function fmtDist(km){ const ft=km*3280.84; return ft<1000? `${Math.max(50,Math.round(ft/50)*50)} ft` : `${miles(km)} mi`; }
+
+function startArea(){
+  clearMineral(); reqId++;
+  if(marker){ map.removeLayer(marker); marker=null; }
+  if(AREA.result) renderHunt(AREA.result); else renderAreaSetup();
+  showLegend(!!AREA.result);
+  if(!AREA.pin) mapNote(map.getZoom()>=MIN_PIN_ZOOM?'Tap the map to drop your pin':'Zoom in to where you want to hunt, then tap to drop a pin');
+}
+function clearArea(){
+  AREA.run++; areaLayer.clearLayers();
+  AREA.pin=null; AREA.circle=null; AREA.result=null; AREA.place=null; backTo=null; showLegend(false);
+}
+async function areaSearch(q){
+  setPanel(statusHtml(`Finding “${esc(q)}”…`));
+  try{
+    const hit=await geocode(q);
+    if(MODE!=='area') return;
+    if(!hit){ setPanel(problemHtml(`No match for “${esc(q)}”. Search a nearby town, then tap the map to drop your pin.`)); return; }
+    map.setView([hit.lat,hit.lng],13);
+    placePin(hit.lat,hit.lng,String(hit.name).split(', ').slice(0,3).join(', '));
+  }catch(err){ setPanel(problemHtml('Place search didn\'t respond. Check your connection and search again.')); }
+}
+map.on('zoomend',()=>{
+  if(MODE!=='area'||AREA.pin) return;
+  mapNote(map.getZoom()>=MIN_PIN_ZOOM?'Tap the map to drop your pin':'Zoom in closer to drop a pin');
+});
+
+function areaTap(ll){
+  const z=map.getZoom();
+  if(AREA.result){                       // results showing: a tap reads the ground there
+    if(!backTo) backTo={html:document.getElementById('panel').innerHTML,label:'hunt area'};
+    lookup(ll.lat,ll.lng); return;
+  }
+  if(z<MIN_PIN_ZOOM){
+    const nz=Math.min(z+3,MIN_PIN_ZOOM+1);
+    map.setView(ll,nz);
+    mapNote(nz>=MIN_PIN_ZOOM?(AREA.pin?'Tap again to move your pin':'Tap again to drop your pin'):'Keep zooming in to drop a pin');
+    return;
+  }
+  placePin(ll.lat,ll.lng);
+}
+
+function placePin(lat,lng,label){
+  AREA.run++; AREA.result=null; backTo=null;
+  AREA.pin={lat,lng}; AREA.place=label||null;
+  areaLayer.clearLayers(); showLegend(false);
+  if(marker){ map.removeLayer(marker); marker=null; }
+  const m=L.marker([lat,lng],{icon:pinIcon,draggable:true,keyboard:true,title:'Hunt center. Drag to move.'}).addTo(areaLayer);
+  m.on('dragend',()=>{ const p=m.getLatLng(); placePin(p.lat,p.lng); });
+  AREA.circle=L.circle([lat,lng],{radius:AREA.radiusMi*1609.344,color:'#e3a72f',weight:3,fillColor:'#e3a72f',fillOpacity:.08,interactive:false}).addTo(areaLayer);
+  if(!map.getBounds().contains(AREA.circle.getBounds())) map.fitBounds(AREA.circle.getBounds().pad(0.08));
+  note.getContainer().hidden=true;
+  renderAreaSetup();
+  if(!label) namePin(AREA.run);
+}
+async function namePin(run){
+  try{
+    const j=await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=12&lat=${AREA.pin.lat}&lon=${AREA.pin.lng}`)).json();
+    if(run!==AREA.run) return;
+    const a=j.address||{};
+    const nm=[a.village||a.town||a.city||a.hamlet||a.county, a.state].filter(Boolean).join(', ');
+    if(nm){ AREA.place='Near '+nm; const el=document.getElementById('pinPlace'); if(el) el.textContent=AREA.place; }
+  }catch(e){}
+}
+function pinLabel(){ return AREA.place || `${AREA.pin.lat.toFixed(4)}, ${AREA.pin.lng.toFixed(4)}`; }
+
+function renderAreaSetup(){
+  if(!AREA.pin){
+    setPanel(`<h2>Plan a hunt</h2>
+      <p class="place-sub">Drop a pin where you want to go and choose how far you'll roam. Rock Finder reads the geology, streams, old mines and exposed rock in that circle and picks the best places to look.</p>
+      <ol class="howto">
+        <li><b>1</b><span>Zoom in to the area: search a place above, tap the target button, or zoom the map.</span></li>
+        <li><b>2</b><span>Tap the map to drop a pin. Drag it to fine-tune.</span></li>
+        <li><b>3</b><span>Set a search radius, then tap Find the best spots.</span></li>
+      </ol>`);
+    return;
+  }
+  const i=Math.max(0,RADII.indexOf(AREA.radiusMi));
+  setPanel(`<h2>Plan a hunt</h2>
+    <div class="place-sub" id="pinPlace">${esc(pinLabel())}</div>
+    <div class="radius">
+      <label for="radius">Search radius <output id="radiusOut">${fmtMi(AREA.radiusMi)}</output></label>
+      <input type="range" id="radius" min="0" max="${RADII.length-1}" step="1" value="${i}" aria-valuetext="${fmtMi(AREA.radiusMi)}">
+      <div class="ticks"><span>${RADII[0]} mi</span><span>${RADII[RADII.length-1]} mi</span></div>
+    </div>
+    <button type="button" class="tipsbtn huntgo" data-hunt="go">Find the best spots</button>
+    <p class="small muted">Drag the pin or tap the map to move it.</p>`);
+}
+document.getElementById('panel').addEventListener('input',e=>{
+  if(e.target.id!=='radius') return;
+  AREA.radiusMi=RADII[+e.target.value];
+  document.getElementById('radiusOut').textContent=fmtMi(AREA.radiusMi);
+  e.target.setAttribute('aria-valuetext',fmtMi(AREA.radiusMi));
+  if(AREA.circle) AREA.circle.setRadius(AREA.radiusMi*1609.344);
+});
+document.getElementById('panel').addEventListener('change',e=>{
+  if(e.target.id==='radius' && AREA.circle) map.fitBounds(AREA.circle.getBounds().pad(0.08));
+});
+document.getElementById('panel').addEventListener('click',e=>{
+  const h=e.target.closest('[data-hunt]'); if(!h) return;
+  if(h.dataset.hunt==='go') huntArea();
+  if(h.dataset.hunt==='edit'){ AREA.run++; AREA.result=null; backTo=null; clearHuntMarks(); renderAreaSetup(); map.fitBounds(AREA.circle.getBounds().pad(0.08)); }
+  if(h.dataset.hunt==='spot'){ const s=AREA.result&&AREA.result.spots[+h.dataset.i]; if(s) goToHit(s.lat,s.lng); }
+});
+function clearHuntMarks(){ areaLayer.eachLayer(l=>{ if(l.options&&l.options.huntMark) areaLayer.removeLayer(l); }); showLegend(false); }
+
+/* Evenly spaced sample points (hex grid) inside the circle */
+function hexPoints(lat,lng,rKm,target){
+  const s=Math.max(0.12, rKm*Math.sqrt(Math.PI/(0.866*target)));
+  const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.574, pts=[];
+  const rows=Math.ceil(rKm/(s*0.866));
+  for(let j=-rows;j<=rows;j++){
+    const y=j*s*0.866, off=(j&1)?s/2:0;
+    for(let x=-Math.ceil(rKm/s)*s+off; x<=rKm; x+=s){
+      if(x*x+y*y<=rKm*rKm) pts.push({lat:lat+y/ky,lng:lng+x/kx,x,y});
+    }
+  }
+  return {pts,spacing:s};
+}
+
+/* Streams, mines, quarries and exposed rock from OpenStreetMap */
+const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+async function overpass(q){
+  for(const u of OVERPASS){
+    try{
+      const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+      if(r.ok) return await r.json();
+    }catch(e){}
+  }
+  throw new Error('Overpass unavailable');
+}
+async function fetchFeatures(lat,lng,rKm){
+  const a=`(around:${Math.round(rKm*1000+500)},${lat.toFixed(5)},${lng.toFixed(5)})`;
+  const j=await overpass(`[out:json][timeout:25];(
+    way["waterway"~"^(river|stream|wadi)$"]${a};
+    nwr["landuse"="quarry"]${a}; nwr["historic"="mine"]${a}; nwr["man_made"~"^(mineshaft|adit)$"]${a}; nwr["industrial"="mine"]${a};
+    nw["natural"~"^(cliff|bare_rock|scree|rock)$"]${a}; nw["geological"="outcrop"]${a};
+  );out geom qt 2500;`);
+  const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.574;
+  const P=(la,lo)=>[(lo-lng)*kx,(la-lat)*ky];
+  const out={streams:[],mines:[],rock:[]};
+  (j.elements||[]).forEach(el=>{
+    const t=el.tags||{};
+    let pts=[];
+    if(el.type==='node') pts=[P(el.lat,el.lon)];
+    else if(el.geometry) pts=el.geometry.filter(Boolean).map(g=>P(g.lat,g.lon));
+    else if(el.bounds) pts=[P((el.bounds.minlat+el.bounds.maxlat)/2,(el.bounds.minlon+el.bounds.maxlon)/2)];
+    if(!pts.length) return;
+    const f={pts,name:t.name||'',tags:t};
+    if(t.waterway) out.streams.push(f);
+    else if(t.landuse==='quarry'||t.historic==='mine'||t.man_made==='mineshaft'||t.man_made==='adit'||t.industrial==='mine'){
+      const c=pts.reduce((s,p)=>[s[0]+p[0]/pts.length,s[1]+p[1]/pts.length],[0,0]);   // one point per mine
+      f.pts=[c]; out.mines.push(f);
+    }
+    else out.rock.push(f);
+  });
+  return out;
+}
+/* Nearest feature to a point, in km (local flat projection is fine at this scale) */
+function nearest(x,y,feats){
+  let best=null;
+  for(const f of feats){
+    const p=f.pts;
+    for(let i=0;i<p.length;i++){
+      let d;
+      if(i+1<p.length){
+        const [ax,ay]=p[i],[bx,by]=p[i+1], dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+        const t=L2?Math.max(0,Math.min(1,((x-ax)*dx+(y-ay)*dy)/L2)):0;
+        d=Math.hypot(x-ax-t*dx,y-ay-t*dy);
+      } else d=Math.hypot(x-p[i][0],y-p[i][1]);
+      if(!best||d<best.d) best={d,f};
+    }
+  }
+  return best;
+}
+
+/* ---------- Scoring ---------- */
+const GROUP_W={'Gems and crystals':1,'Metals and ores':.85,'Fossils and oddities':.8,'Rock-forming minerals':.15,'Rocks':.1};
+/* How prized a find is to a rockhound (overrides the group weight) */
+const PRIZE={'Corundum':1.5,'Gold':1.5,'Beryl':1.4,'Topaz':1.3,'Opal':1.3,'Jadeite':1.3,'Tourmaline':1.2,'Nephrite':1.2,'Native copper':1.1,
+  'Thunderegg':1.1,'Amethyst':1.1,'Agate':1,'Garnet':1,'Geode':1,'Fluorite':1,'Petrified wood':1,'Smoky quartz':.9,'Labradorite':.9,
+  'Staurolite':.9,"Tiger's eye":.9,'Celestine (mineral)':.9,'Kyanite':.8,'Olivine':.8,'Apache tears':.8,'Barite rose':.8,'Fossil':.8,
+  'Microcline':.7,'Desert rose (crystal)':.7,'Galena':.7,'Jasper':.6,'Chalcedony':.6,'Zircon':.6,'Epidote':.6,'Sphalerite':.6,'Apatite':.6,
+  'Vesuvianite':.6,'Selenite':.5,'Magnetite':.4,'Aragonite':.4,'Concretion':.4,'Quartz':.3,'Calcite':.3,'Pyrite':.35,'Hematite':.3,
+  'Limonite':.2,'Halite':.2,'Gypsum':.2};
+const prize=k=>PRIZE[k]??(GROUP_W[groupOf(k)]||.15);
+const HOT_ROCKS={
+  pegmatite:[1.2,'Pegmatite is the classic gem rock: big crystals grow in its pockets'],
+  skarn:[1.1,'Skarn forms where hot magma baked limestone, and is known for garnet, epidote and ore minerals'],
+  rhyolite:[.6,'Rhyolite can hold thundereggs, topaz and opal in its cavities'],
+  obsidian:[.6,'Obsidian flows shed Apache tears and volcanic glass'],
+  tuff:[.5,'Volcanic ash beds can hold opal, petrified wood and thundereggs'],
+  basalt:[.5,'Gas holes in basalt fill with agate, chalcedony and zeolites'],
+  serpentinite:[.5,'Serpentinite is where jade and chromite turn up'],
+  iron:[.5,'Iron formations hold hematite, jasper and tiger\'s eye'],
+  alluvium:[.6,'River gravel collects hard, heavy stones washed down from upstream'],
+  beach:[.4,'Beach gravel gathers agate, jasper and other hard stones'],
+  conglomerate:[.3,'Conglomerate is full of old river pebbles, including agate and jasper'],
+  limestone:[.25,'Limestone can hold geodes, fluorite and fossils'],
+};
+const INTRUSIVE=new Set(['granite','granodiorite','diorite','syenite','pegmatite','gabbro']);
+const CARBONATE=new Set(['limestone','dolostone','marble']);
+
+function scoreSample(s){
+  const a=s.a;
+  const vals=[...a.minMap.values()].map(m=>{ const b=minBars(m.score); return {m,b,v:prize(m.name)*b*b/25}; }).sort((x,y)=>y.v-x.v);
+  s.value=vals.slice(0,4).reduce((t,x)=>t+x.v,0);
+  const gems=vals.filter(x=>prize(x.m.name)>=.6 && x.b>=2);
+  s.finds=(gems.length?gems:vals).slice(0,4).map(x=>x.m.name);
+  s.reasons=[];
+  // productive rock types
+  let hot=null;
+  a.rocks.forEach(f=>{ const h=HOT_ROCKS[f.rock.id]; if(!h||f.level<2) return; const v=h[0]*rockBars(f.level)/5; if(!hot||v>hot.v) hot={v,txt:h[1]}; });
+  s.hot=hot?hot.v:0; if(hot) s.reasons.push(hot.txt);
+  s.main=new Set(a.rocks.filter(f=>f.level>=2).map(f=>f.rock.id));
+  if(!s.main.size && a.rocks[0]) s.main.add(a.rocks[0].rock.id);
+  s.unitKey=(s.units[0].name||s.units[0].strat_name||s.units[0].lith||'')+'';
+}
+function rockName(id){ const r=ROCKS.find(x=>x.id===id); return r?r.name.split(' / ')[0].replace(/ \(.*\)/,'').toLowerCase():id; }
+
+function scoreArea(samples,spacing,feats){
+  samples.forEach(scoreSample);
+  // contacts between different rock units
+  samples.forEach(s=>{
+    s.contact=0;
+    for(const o of samples){
+      if(o===s || Math.hypot(o.x-s.x,o.y-s.y)>spacing*1.3) continue;
+      if(o.unitKey===s.unitKey || [...o.main].some(id=>s.main.has(id))) continue;
+      const ign=[...s.main,...o.main].find(id=>INTRUSIVE.has(id)), carb=[...s.main,...o.main].find(id=>CARBONATE.has(id));
+      if(ign&&carb&&s.contact<1.2){ s.contact=1.2; s.contactTxt=`Near where ${rockName(ign)} meets ${rockName(carb)}. Contacts like this can form skarn, with garnet, epidote and ore minerals`; }
+      else if(s.contact<.45){
+        const A=[...s.main][0], B=[...o.main][0];
+        s.contact=.45; s.contactTxt=A&&B?`On the edge between ${rockName(A)} and ${rockName(B)}. Veins and mineral pockets often form where rock types meet`:`On the edge between two rock units, where veins and mineral pockets often form`;
+      }
+    }
+    if(s.contact) s.reasons.push(s.contactTxt);
+  });
+  // geography from OpenStreetMap
+  samples.forEach(s=>{
+    s.geo=0;
+    if(!feats) return;
+    const st=nearest(s.x,s.y,feats.streams);
+    if(st&&st.d<0.35){
+      s.geo+=st.d<0.15?.9:.6;
+      const t=st.f.tags, dry=t.intermittent==='yes'||t.waterway==='wadi';
+      s.reasons.push(`${st.f.name||(dry?'A dry wash':'A stream')} ${st.d<0.05?'runs right here':`is ${fmtDist(st.d)} away`}. Check gravel bars and inside bends, where water drops hard, heavy stones`);
+    }
+    const mn=nearest(s.x,s.y,feats.mines);
+    if(mn&&mn.d<1.2){
+      s.geo+=mn.d<0.4?1:.6;
+      const t=mn.f.tags, q=t.landuse==='quarry';
+      s.reasons.push(`${q?'A quarry':'An old mine'}${mn.f.name?` (${mn.f.name})`:''} is ${fmtDist(mn.d)} away. ${q?'Quarries are usually private and may be active, so ask before entering.':'Dumps and tailings often hold specimens. Stay out of shafts and tunnels, and get permission first.'}`);
+      s.mine=true;
+    }
+    const rk=nearest(s.x,s.y,feats.rock);
+    if(rk&&rk.d<0.3){
+      s.geo+=.45;
+      const n=rk.f.tags.natural;
+      s.reasons.push(`${n==='cliff'?'Cliffs':n==='scree'?'A scree slope':'Exposed rock'} ${rk.d<0.05?'right here':`${fmtDist(rk.d)} away`}, so bedrock shows instead of hiding under soil`);
+    }
+  });
+  samples.forEach(s=>{
+    s.score=s.value+s.hot+s.contact+s.geo;
+    s.bars=s.score>=4.2?5:s.score>=3.2?4:s.score>=2.3?3:s.score>=1.1?2:1;
+  });
+}
+
+/* Best spots, kept apart so they're not all in one place */
+function pickSpots(samples,rKm,n){
+  const sep=Math.max(0.25,rKm/3.2), out=[];
+  [...samples].sort((a,b)=>b.adj-a.adj).forEach(s=>{
+    if(out.length>=n || s.adj<1) return;
+    if(out.some(o=>Math.hypot(o.x-s.x,o.y-s.y)<sep)) return;
+    out.push(s);
+  });
+  return out;
+}
+
+/* Is a spot inside a park, refuge or reserve? One Overpass query for several spots. */
+async function checkParks(spots){
+  const q='[out:json][timeout:20];'+spots.map((s,i)=>
+    `is_in(${s.lat.toFixed(5)},${s.lng.toFixed(5)})->.a${i};(area.a${i}["boundary"~"^(national_park|protected_area|aboriginal_lands)$"];area.a${i}["leisure"="nature_reserve"];);make spot ix="${i}",names=set(t["name"]),bnd=set(t["boundary"]),cls=set(t["protect_class"]),lei=set(t["leisure"]);out;`).join('');
+  const j=await overpass(q);
+  (j.elements||[]).forEach(el=>{ const t=el.tags||{}, s=spots[+t.ix]; if(s) s.park=parkVerdict(t); });
+  spots.forEach(s=>{ if(s.park===undefined) s.park=null; });
+}
+function parkVerdict(t){
+  const names=(t.names||'').split(';').filter(Boolean), b=t.bnd||'', cls=t.cls||'';
+  if(!names.length && !b && !t.lei) return {level:'none'};
+  const all=names.join(' | ');
+  const pick=re=>names.find(n=>re.test(n))||names[0]||'a protected area';
+  const BAN=/National Park|National Monument|State Park|Wildlife Refuge|Nature Preserve|National Historic|Wildlife Area|State Natural Area/i;
+  if(/national_park/.test(b) || BAN.test(all) || /(^|;)(1a|1b|2|3)(;|$)/.test(cls))
+    return {level:'no',text:`Inside ${pick(BAN)}. Collecting is usually not allowed in parks, monuments and refuges.`};
+  if(/aboriginal_lands/.test(b)) return {level:'no',text:`On tribal land (${names[0]||'a reservation'}). Collecting needs permission from the tribe.`};
+  const OK=/National Forest|National Grassland|Bureau of Land Management|\bBLM\b/i;
+  if(OK.test(all)) return {level:'ok',text:`Inside ${pick(OK)}. National forests and BLM land usually allow collecting small amounts for personal use. Check the local office's rules.`};
+  return {level:'check',text:`Inside ${names[0]||'a protected area'}. Check its collecting rules before you go.`};
+}
+const PARK_W={no:.3,check:.9,ok:1.05,none:1};
+
+async function huntArea(){
+  if(!AREA.pin) return;
+  const run=++AREA.run, {lat,lng}=AREA.pin, rKm=AREA.radiusMi*1.609344;
+  backTo=null; clearHuntMarks(); reqId++;
+  const {pts,spacing}=hexPoints(lat,lng,rKm,80);
+  const head=`<div class="hunttop"><h2>Best spots to hunt</h2></div><div class="place-sub">Within ${fmtMi(AREA.radiusMi)} of ${esc(pinLabel())}</div>`;
+  const prog=(n,t)=>`<div class="progress"><div class="bar"><i style="width:${Math.round(n/pts.length*100)}%"></i></div><span>${t}</span></div>`;
+  setPanel(head+prog(0,'Reading the geologic map…'));
+  map.fitBounds(AREA.circle.getBounds().pad(0.05));
+  const featsP=fetchFeatures(lat,lng,rKm).catch(()=>null);
+
+  const samples=[]; let idx=0, done=0, failed=0;
+  const worker=async()=>{ while(idx<pts.length){ const p=pts[idx++];
+    try{ const units=await fetchUnits(p.lat,p.lng); if(run!==AREA.run) return; if(units.length) samples.push({...p,units,a:analyze(units)}); }
+    catch(e){ failed++; }
+    done++;
+    if(run===AREA.run && (done%4===0||done===pts.length)) setPanel(head+prog(done,`Checked the geology at ${done} of ${pts.length} spots`));
+  }};
+  await Promise.all([1,2,3,4,5,6].map(worker));
+  if(run!==AREA.run) return;
+  if(!samples.length){
+    setPanel(head+problemHtml(failed?'The geology service didn\'t respond. Check your connection and try again.':'No mapped geology in this circle. It may be water or outside map coverage. Move the pin onto land.')
+      +'<button type="button" class="tipsbtn huntgo" data-hunt="edit" style="margin-top:1rem">Change the area</button>');
+    return;
+  }
+  setPanel(head+prog(pts.length,'Checking streams, old mines and exposed rock…'));
+  const feats=await featsP;
+  if(run!==AREA.run) return;
+  scoreArea(samples,spacing,feats);
+  samples.forEach(s=>s.adj=s.score);
+
+  // Pick spots, then check parks; repeat if a banned spot dropped out
+  setPanel(head+prog(pts.length,'Checking parks and reserves…'));
+  let spots=[], parksOk=true;
+  for(let round=0;round<3;round++){
+    spots=pickSpots(samples,rKm,5);
+    const unchecked=spots.filter(s=>s.park===undefined);
+    if(!unchecked.length) break;
+    try{ await checkParks(unchecked); }catch(e){ parksOk=false; break; }
+    if(run!==AREA.run) return;
+    unchecked.forEach(s=>{ s.adj=s.score*PARK_W[s.park?s.park.level:'none']; });
+  }
+  if(run!==AREA.run) return;
+  spots=pickSpots(samples,rKm,5);
+  spots.forEach(s=>{ s.km=distKm(lat,lng,s.lat,s.lng); s.dir=bearing(lat,lng,s.lat,s.lng); });
+
+  // What the circle is made of
+  const share=new Map();
+  samples.forEach(s=>s.main.forEach(id=>share.set(id,(share.get(id)||0)+1)));
+  const rocks=[...share.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([id,n])=>({rock:ROCKS.find(r=>r.id===id),pct:Math.round(n/samples.length*100)})).filter(x=>x.rock);
+  const best=new Map();
+  samples.forEach(s=>s.finds.forEach((k,i)=>best.set(k,(best.get(k)||0)+s.bars*(4-i))));
+  const finds=[...best.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k])=>k);
+
+  AREA.result={spots,samples,rocks,finds,feats:!!feats,parksOk,failed,checked:pts.length,radiusMi:AREA.radiusMi};
+  drawHunt(AREA.result);
+  renderHunt(AREA.result);
+  nameSpots(run);
+}
+
+function drawHunt(res){
+  clearHuntMarks();
+  const css=getComputedStyle(document.documentElement);
+  res.samples.forEach(s=>{
+    L.circleMarker([s.lat,s.lng],{huntMark:true,radius:3+s.bars*.8,weight:0,fillColor:css.getPropertyValue('--l'+s.bars).trim()||'#2f6b4f',fillOpacity:.6})
+      .bindTooltip(`${LIKE[s.bars].t}<br>${esc(s.unitKey||'Mapped rock unit')}`).addTo(areaLayer);
+  });
+  res.spots.forEach((s,i)=>{
+    L.marker([s.lat,s.lng],{huntMark:true,zIndexOffset:500,icon:L.divIcon({className:'',html:`<div class="rankpin">${i+1}</div>`,iconSize:[30,30],iconAnchor:[15,15]})})
+      .bindTooltip(`#${i+1}: ${esc(s.unitKey||'Mapped rock unit')}`)
+      .on('click',()=>{ const el=document.getElementById('spot-'+i); if(el) el.scrollIntoView({behavior:'smooth',block:'nearest'}); else goToHit(s.lat,s.lng); })
+      .addTo(areaLayer);
+  });
+  showLegend(true);
+}
+
+function renderHunt(res){
+  res.spots.forEach(s=>s.finds.forEach(k=>{ if(!INFO[k]) INFO[k]={name:MINERAL_LABEL(k),tag:'Mineral or crystal',bars:0,why:[]}; }));
+  const head=`<div class="hunttop"><h2>Best spots to hunt</h2><button type="button" class="back" data-hunt="edit">Change area</button></div>
+    <div class="place-sub">Within ${fmtMi(res.radiusMi)} of <span id="pinPlace">${esc(pinLabel())}</span></div>`;
+  const list=res.spots.length? `<div class="list">${res.spots.map((s,i)=>`
+    <article class="row hit spot" id="spot-${i}" style="--lvl:${LIKE[s.bars].c}">
+      <div class="dist"><b>${i+1}</b><span>${s.km<0.1?'at pin':`${fmtDist(s.km)} ${dirName(s.dir)}`}</span></div>
+      <div>
+        <div class="kind" id="spotname-${i}">${s.placeName?esc(s.placeName):'&nbsp;'}</div>
+        <h4 class="nm">${esc(s.unitKey||'Mapped rock unit')}</h4>
+        ${meter(s.bars)}
+        ${s.finds.length?`<div class="links-chips">${s.finds.map(k=>`<button type="button" class="lchip" data-tips="${esc(k)}">${esc(MINERAL_LABEL(k))}</button>`).join('')}</div>`:''}
+        ${s.reasons.length?`<ul class="where reasons">${s.reasons.slice(0,4).map(r=>`<li>${esc(/[.!?]$/.test(r)?r:r+'.')}</li>`).join('')}</ul>`:''}
+        ${s.park&&s.park.text?`<p class="park ${s.park.level}">${esc(s.park.text)}</p>`:''}
+        <div class="actions">
+          <button type="button" class="tipsbtn" data-hunt="spot" data-i="${i}">See this spot</button>
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat.toFixed(5)},${s.lng.toFixed(5)}" target="_blank" rel="noopener">Directions</a>
+        </div>
+      </div>
+    </article>`).join('')}</div>`
+    : problemHtml('Nothing in this circle stands out for gems or minerals on the geologic map. Try a bigger radius, or move the pin toward hills, streams or old mining areas.');
+  const rocks=res.rocks.length?`<h3>What's in this circle</h3><div class="shares">${res.rocks.map(x=>`<div class="share"><span>${esc(x.rock.name)}</span><i style="width:${x.pct}%"></i><b>${x.pct}%</b></div>`).join('')}</div>`:'';
+  const finds=res.finds.length?`<h4 style="font:600 1.05rem var(--cond);margin:1rem 0 .4rem;color:var(--muted)">Best finds in the area</h4><div class="links-chips">${res.finds.map(k=>`<button type="button" class="lchip" data-tips="${esc(k)}">${esc(MINERAL_LABEL(k))}</button>`).join('')}</div>`:'';
+  res.finds.forEach(k=>{ if(!INFO[k]) INFO[k]={name:MINERAL_LABEL(k),tag:'Mineral or crystal',bars:0,why:[]}; });
+  setPanel(head+(res.spots.length?'<h3>Top spots</h3>':'')+list+rocks+finds+`
+    <div class="note"><p><b>How this works.</b> Rock Finder read the geologic map at ${res.checked} spots in the circle. Each spot gets points for the gems and minerals its rocks are known to hold, for gem-friendly rocks like pegmatite and basalt, for edges where two rock types meet${res.feats?', and for nearby streams, old mines and exposed rock from OpenStreetMap':''}. It shows where the odds are best, not confirmed finds.</p>
+    ${res.feats?'':'<p class="small muted">Stream and mine data didn\'t load, so the ranking uses geology only.</p>'}
+    ${res.parksOk?'':'<p class="small muted">The park check didn\'t load, so check land status yourself.</p>'}
+    <p><b>Before you go,</b> check who owns the land. Collecting is banned in national parks and needs permission on private land. BLM and national forest maps show public land.</p>
+    ${res.failed?`<p class="small muted">${res.failed} spots didn't load and were skipped.</p>`:''}</div>
+    <p class="credits">Geology from <a href="https://macrostrat.org" target="_blank" rel="noopener">Macrostrat</a> (CC-BY 4.0). Streams, mines and parks from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</p>`);
+  document.getElementById('panel').scrollTop=0;
+}
+async function nameSpots(run){
+  for(const [i,s] of AREA.result.spots.entries()){
+    if(run!==AREA.run) return;
+    if(s.placeName) continue;
+    try{
+      const j=await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&lat=${s.lat}&lon=${s.lng}`)).json();
+      const a=j.address||{};
+      const nm=[a.road||a.hamlet||a.village||a.town||a.city, a.county].filter(Boolean).join(', ');
+      if(nm && run===AREA.run){ s.placeName='Near '+nm; const el=document.getElementById('spotname-'+i); if(el) el.textContent=s.placeName; }
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,1100));   // Nominatim allows 1 request per second
+  }
+}
 
 
 /* ---------- Explore: browse every mineral and rock ---------- */
