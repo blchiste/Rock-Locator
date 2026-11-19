@@ -215,6 +215,18 @@
   .radius input{width:100%;accent-color:var(--juniper);margin:.5rem 0 .1rem;height:28px}
   .radius .ticks{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted)}
   .hunting .legend .you-row{display:none}
+  .legend .hunt-row{display:none!important}
+  .hunting .legend .hunt-row{display:flex!important}
+  .legend i.lfault{width:18px;height:0;border:0;border-top:3px dashed #c0392b;border-radius:0;box-shadow:none}
+  .legend i.lmrds,.mrdspin{width:11px;height:11px;border-radius:2px;transform:rotate(45deg);background:#7a5a2f;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+  .mrdspin{margin:1px}
+  .mrdspin.prod{background:#3b2a14}
+  .layerctl{display:flex;flex-direction:column;gap:.35rem}
+  .layerctl select{font:600 .9rem var(--body);border-radius:4px;border:0;padding:.2rem .3rem;background:#eef0e6;color:#1e2622}
+  .find.guide{border-left-color:var(--blaze)}
+  .spotlinks{display:flex;flex-wrap:wrap;gap:.3rem .9rem;font-size:.86rem;margin:.5rem 0 .1rem}
+  .sumh{font:600 1.05rem var(--cond);margin:1rem 0 .3rem;color:var(--muted)}
+  ul.sites{font-size:.9rem}
   /* Hunt loading animation */
   .hloader{display:flex;align-items:center;gap:1rem;background:var(--card);border-radius:8px;padding:1rem;margin:.9rem 0 .2rem}
   .hloader b{display:block;font:700 1.3rem/1.15 var(--cond)}
@@ -617,17 +629,22 @@ const TIPS={}; Object.entries(TIPS_RAW).forEach(([k,[id,find]])=>TIPS[k]={id,fin
 
 /* ---------- Map ---------- */
 const map = L.map('map',{zoomControl:true}).setView([39.5,-98.35],4);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-  maxZoom:18, attribution:'&copy; OpenStreetMap'}).addTo(map);
+const BASES={
+  streets:L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18, attribution:'&copy; OpenStreetMap'}),
+  topo:L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17, attribution:'&copy; OpenStreetMap, SRTM | &copy; OpenTopoMap (CC-BY-SA)'}),
+  satellite:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:18, attribution:'Imagery &copy; Esri, Maxar, Earthstar Geographics'}),
+};
+let baseNow=BASES.streets.addTo(map);
 const geoLayer = L.tileLayer('https://tiles.macrostrat.org/carto/{z}/{x}/{y}.png',{
   maxZoom:18, opacity:.55, attribution:'Geology: Macrostrat'});
 geoLayer.addTo(map);
 
 const Ctl = L.Control.extend({onAdd(){
   const d=L.DomUtil.create('div','layerctl');
-  d.innerHTML='<label><input type="checkbox" checked id="geoToggle"> Geology colors</label>';
+  d.innerHTML='<label><input type="checkbox" checked id="geoToggle"> Geology colors</label><select id="baseSel" aria-label="Base map"><option value="streets">Streets</option><option value="topo">Topo</option><option value="satellite">Satellite</option></select>';
   L.DomEvent.disableClickPropagation(d);
   d.querySelector('input').addEventListener('change',e=>e.target.checked?geoLayer.addTo(map):map.removeLayer(geoLayer));
+  d.querySelector('select').addEventListener('change',e=>{ map.removeLayer(baseNow); baseNow=BASES[e.target.value].addTo(map); baseNow.bringToBack(); });
   return d;}});
 map.addControl(new Ctl({position:'topright'}));
 
@@ -1208,7 +1225,7 @@ function drawHits(hits,start,fit){
 /* Map key for the rating colors */
 const Legend=L.Control.extend({onAdd(){
   const d=L.DomUtil.create('div','legend');
-  d.innerHTML='<div class="lt">Chance of finding it</div>'+[5,4,3,2,1].map(n=>`<div><i style="background:var(--l${n});width:${8+n*2}px;height:${8+n*2}px"></i>${LIKE[n].t}</div>`).join('')+'<div class="you-row"><i class="you"></i>You</div>';
+  d.innerHTML='<div class="lt">Chance of finding it</div>'+[5,4,3,2,1].map(n=>`<div><i style="background:var(--l${n});width:${8+n*2}px;height:${8+n*2}px"></i>${LIKE[n].t}</div>`).join('')+'<div class="you-row"><i class="you"></i>You</div><div class="hunt-row"><i class="lfault"></i>Fault</div><div class="hunt-row"><i class="lmrds"></i>Mine or prospect</div>';
   L.DomEvent.disableClickPropagation(d); return d;}});
 const legend=new Legend({position:'bottomleft'}); let legendOn=false;
 function showLegend(on){ if(on&&!legendOn){legend.addTo(map);legendOn=true;} if(!on&&legendOn){map.removeControl(legend);legendOn=false;} }
@@ -1366,7 +1383,7 @@ function hexPoints(lat,lng,rKm,target){
   for(let j=-rows;j<=rows;j++){
     const y=j*s*0.866, off=(j&1)?s/2:0;
     for(let x=-Math.ceil(rKm/s)*s+off; x<=rKm; x+=s){
-      if(x*x+y*y<=rKm*rKm) pts.push({lat:lat+y/ky,lng:lng+x/kx,x,y});
+      if(x*x+y*y<=rKm*rKm) pts.push({lat:lat+y/ky,lng:lng+x/kx,x,y,i:pts.length});
     }
   }
   return {pts,spacing:s};
@@ -1392,10 +1409,11 @@ async function fetchFeatures(lat,lng,rKm){
     way["waterway"~"^(river|stream|wadi)$"]${a};
     nwr["landuse"="quarry"]${a}; nwr["historic"="mine"]${a}; nwr["man_made"~"^(mineshaft|adit)$"]${a}; nwr["industrial"="mine"]${a};
     nw["natural"~"^(cliff|bare_rock|scree|rock)$"]${a}; nw["geological"="outcrop"]${a};
+    nw["natural"~"^(volcano|hot_spring|geyser)$"](around:${Math.round(rKm*1000+8000)},${lat.toFixed(5)},${lng.toFixed(5)});
   );out geom qt 1500;`,10000);
   const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.574;
   const P=(la,lo)=>[(lo-lng)*kx,(la-lat)*ky];
-  const out={streams:[],mines:[],rock:[]};
+  const out={streams:[],mines:[],rock:[],volcanic:[]};
   (j.elements||[]).forEach(el=>{
     const t=el.tags||{};
     let pts=[];
@@ -1409,10 +1427,135 @@ async function fetchFeatures(lat,lng,rKm){
       const c=pts.reduce((s,p)=>[s[0]+p[0]/pts.length,s[1]+p[1]/pts.length],[0,0]);   // one point per mine
       f.pts=[c]; out.mines.push(f);
     }
+    else if(/^(volcano|hot_spring|geyser)$/.test(t.natural||'')){ f.pts=[pts[0]]; f.kind=t.natural; out.volcanic.push(f); }
     else out.rock.push(f);
   });
   return out;
 }
+
+/* ---------- Elevation (Open-Meteo, Copernicus 90 m DEM), up to 100 points per request ---------- */
+async function fetchElevations(points,ms=8000){
+  const out=new Array(points.length).fill(null), ctl=timeoutSignal(ms), jobs=[];
+  for(let i=0;i<points.length;i+=100){
+    const chunk=points.slice(i,i+100);
+    jobs.push(fetch(`https://api.open-meteo.com/v1/elevation?latitude=${chunk.map(p=>p.lat.toFixed(5)).join(',')}&longitude=${chunk.map(p=>p.lng.toFixed(5)).join(',')}`,{signal:ctl.signal})
+      .then(r=>r.json()).then(j=>(j.elevation||[]).forEach((e,k)=>{ if(Number.isFinite(e)) out[i+k]=e; })));
+  }
+  await Promise.all(jobs);
+  return out;
+}
+
+/* ---------- Faults and dikes: the "lines" layer of Macrostrat's vector tiles ---------- */
+// Minimal Mapbox Vector Tile reader (protobuf): just enough for line features and their tags.
+function mvtLines(buf,layerName){
+  const b=new Uint8Array(buf); let pos=0;
+  const varint=()=>{ let r=0,s=1,c; do{ c=b[pos++]; r+=(c&127)*s; s*=128; }while(c>=128); return r; };
+  const skip=w=>{ if(w===0) varint(); else if(w===1) pos+=8; else if(w===2){ const l=varint(); pos+=l; } else if(w===5) pos+=4; };
+  const str=(end)=>new TextDecoder().decode(b.subarray(pos,end));
+  const out=[];
+  while(pos<b.length){
+    const tag=varint(), f=tag>>3, w=tag&7;
+    if(f!==3||w!==2){ skip(w); continue; }
+    const lend=varint()+pos; let name='', extent=4096; const keys=[], vals=[], feats=[];
+    while(pos<lend){
+      const t=varint(), lf=t>>3, lw=t&7;
+      if(lf===1&&lw===2){ const l=varint(); name=str(pos+l); pos+=l; }
+      else if(lf===3&&lw===2){ const l=varint(); keys.push(str(pos+l)); pos+=l; }
+      else if(lf===4&&lw===2){ const vend=varint()+pos; let v=null;
+        while(pos<vend){ const vt=varint(), vf=vt>>3, vw=vt&7;
+          if(vf===1){ const l=varint(); v=str(pos+l); pos+=l; }
+          else if(vf===2){ v=new DataView(b.buffer,b.byteOffset+pos,4).getFloat32(0,true); pos+=4; }
+          else if(vf===3){ v=new DataView(b.buffer,b.byteOffset+pos,8).getFloat64(0,true); pos+=8; }
+          else if(vf===4||vf===5){ v=varint(); }
+          else if(vf===6){ const z=varint(); v=(z%2)?-(z+1)/2:z/2; }
+          else if(vf===7){ v=!!varint(); }
+          else skip(vw); }
+        vals.push(v); }
+      else if(lf===5&&lw===0) extent=varint();
+      else if(lf===2&&lw===2){ const fend=varint()+pos; const ft={tags:[],type:0,geom:[]};
+        while(pos<fend){ const t2=varint(), ff=t2>>3, fw=t2&7;
+          if((ff===2||ff===4)&&fw===2){ const e=varint()+pos, arr=[]; while(pos<e) arr.push(varint()); if(ff===2) ft.tags=arr; else ft.geom=arr; }
+          else if(ff===3&&fw===0) ft.type=varint();
+          else skip(fw); }
+        feats.push(ft); }
+      else skip(lw);
+    }
+    if(name!==layerName) continue;
+    feats.forEach(ft=>{
+      if(ft.type!==2) return;
+      const props={}; for(let i=0;i+1<ft.tags.length;i+=2) props[keys[ft.tags[i]]]=vals[ft.tags[i+1]];
+      const lines=[]; let x=0,y=0,cur=null,i=0;
+      while(i<ft.geom.length){
+        const cmd=ft.geom[i]&7, n=ft.geom[i]>>3; i++;
+        for(let k=0;k<n;k++){
+          if(cmd===7) continue;
+          const dx=ft.geom[i++], dy=ft.geom[i++];
+          x+=(dx%2)?-(dx+1)/2:dx/2; y+=(dy%2)?-(dy+1)/2:dy/2;
+          if(cmd===1){ cur=[]; lines.push(cur); }
+          cur.push([x/extent,y/extent]);
+        }
+      }
+      out.push({props,lines});
+    });
+  }
+  return out;
+}
+async function tileBytes(r){
+  const buf=await r.arrayBuffer(), u=new Uint8Array(buf);
+  if(u[0]===0x1f&&u[1]===0x8b&&typeof DecompressionStream!=='undefined')   // gzip without a Content-Encoding header
+    return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  return buf;
+}
+const LINE_KIND=t=>{ t=(t||'').toLowerCase(); if(/dike|dyke|sill/.test(t)) return 'dike'; if(/vein/.test(t)) return 'vein'; if(/fault|thrust|shear|detachment/.test(t)) return 'fault'; return null; };
+async function fetchFaults(lat,lng,rKm,ms=9000){
+  const dLat=rKm/110.574, dLng=rKm/(111.32*Math.cos(lat*Math.PI/180));
+  const T=(la,lo,z)=>{ const n=2**z, x=(lo+180)/360*n, r=la*Math.PI/180, y=(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n; return [x,y]; };
+  let z=12, t0, t1;
+  for(;z>=7;z--){ t0=T(lat+dLat,lng-dLng,z); t1=T(lat-dLat,lng+dLng,z); if((Math.floor(t1[0])-Math.floor(t0[0])+1)*(Math.floor(t1[1])-Math.floor(t0[1])+1)<=6) break; }
+  const ctl=timeoutSignal(ms), jobs=[], out=[], n=2**z;
+  const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.574;
+  for(let tx=Math.floor(t0[0]);tx<=Math.floor(t1[0]);tx++) for(let ty=Math.floor(t0[1]);ty<=Math.floor(t1[1]);ty++){
+    jobs.push(fetch(`https://tiles.macrostrat.org/carto/${z}/${tx}/${ty}.mvt`,{signal:ctl.signal}).then(r=>r.ok?tileBytes(r):null).then(buf=>{
+      if(!buf) return;
+      mvtLines(buf,'lines').forEach(f=>{
+        const kind=LINE_KIND(f.props.type); if(!kind) return;
+        f.lines.forEach(ln=>{
+          const ll=ln.map(([px,py])=>{ const X=(tx+px)/n, Y=(ty+py)/n; return [Math.atan(Math.sinh(Math.PI*(1-2*Y)))*180/Math.PI, X*360-180]; });
+          out.push({kind,name:f.props.name||'',type:f.props.type||'',descrip:f.props.descrip||'',ll,pts:ll.map(([a,o])=>[(o-lng)*kx,(a-lat)*ky])});
+        });
+      });
+    }).catch(()=>{}));
+  }
+  await Promise.all(jobs);
+  if(ctl.signal.aborted && !out.length) throw new Error('faults timed out');
+  const seen=new Set();      // the same line can come back from neighboring tiles
+  return out.filter(f=>{ const k=f.kind+f.name+f.ll.map(([a,o])=>a.toFixed(4)+','+o.toFixed(4)).join(';'); if(seen.has(k)) return false; seen.add(k); return true; });
+}
+
+/* ---------- Documented mines, prospects and occurrences: USGS Mineral Resources Data System ---------- */
+const MRDS_URL='https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/Mineral_Resources_Data_System_MRDS_Compact_Version/FeatureServer/0/query';
+const COMMODITY={AU:'gold',AG:'silver',CU:'copper',PB:'lead',ZN:'zinc',FE:'iron',MN:'manganese',MO:'molybdenum',W:'tungsten',SN:'tin',
+  HG:'mercury',SB:'antimony',AS:'arsenic',BI:'bismuth',U:'uranium',V:'vanadium',TH:'thorium',REE:'rare earths',BE:'beryllium',LI:'lithium',
+  NB:'niobium',TA:'tantalum',CR:'chromium',NI:'nickel',CO:'cobalt',PGE:'platinum group',PT:'platinum',TI:'titanium',ZR:'zirconium',
+  FLR:'fluorite',F:'fluorite',BA:'barite',BRT:'barite',MICA:'mica',FLD:'feldspar',FELD:'feldspar',GEM:'gemstones',GYP:'gypsum',TLC:'talc',
+  ASB:'asbestos',CLY:'clay',STN:'stone',SDG:'sand and gravel',LIM:'limestone',SIL:'silica',QTZ:'quartz',GRT:'garnet',GNT:'garnet',
+  OPL:'opal',TRQ:'turquoise',AGT:'agate',CAL:'calcite',PER:'perlite',PUM:'pumice',ZEO:'zeolites',DIA:'diamond',CORU:'corundum',KY:'kyanite',GRP:'graphite'};
+const COMMODITY_MIN={gold:'Gold',copper:'Native copper',lead:'Galena',zinc:'Sphalerite',iron:'Hematite',fluorite:'Fluorite',barite:'Barite rose',
+  beryllium:'Beryl',mica:'Muscovite',feldspar:'Microcline',quartz:'Quartz',silica:'Quartz',garnet:'Garnet',opal:'Opal',agate:'Agate',
+  calcite:'Calcite',zeolites:'Zeolite',corundum:'Corundum',kyanite:'Kyanite',graphite:'Graphite',chromium:'Chromite',gypsum:'Selenite',talc:'Talc'};
+function commodities(code){ return [...new Set(String(code||'').split(/[\s,;]+/).filter(Boolean).map(c=>COMMODITY[c.toUpperCase()]||c.toLowerCase()))]; }
+async function fetchMRDS(lat,lng,rKm,ms=9000){
+  const pad=rKm+1.5, dLat=pad/110.574, dLng=pad/(111.32*Math.cos(lat*Math.PI/180));
+  const q=new URLSearchParams({where:'1=1',geometry:[lng-dLng,lat-dLat,lng+dLng,lat+dLat].map(v=>v.toFixed(5)).join(','),
+    geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects',outFields:'SITE_NAME,DEV_STAT,CODE_LIST,URL',
+    returnGeometry:'true',outSR:'4326',resultRecordCount:'1000',f:'json'});
+  const r=await fetch(MRDS_URL+'?'+q,{signal:timeoutSignal(ms).signal});
+  const j=await r.json(); if(j.error) throw new Error('MRDS error');
+  const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.574;
+  return (j.features||[]).filter(f=>f.geometry).map(f=>{ const a=f.attributes||{}, la=f.geometry.y, lo=f.geometry.x;
+    return {name:a.SITE_NAME||'Unnamed site',status:a.DEV_STAT||'',url:a.URL||'',comm:commodities(a.CODE_LIST),lat:la,lng:lo,pts:[[(lo-lng)*kx,(la-lat)*ky]]}; });
+}
+const PRODUCER=s=>/producer/i.test(s||'');
 /* Nearest feature to a point, in km (local flat projection is fine at this scale) */
 function nearest(x,y,feats){
   let best=null;
@@ -1475,6 +1618,8 @@ function scoreSample(s){
   s.main=new Set(a.rocks.filter(f=>f.level>=2).map(f=>f.rock.id));
   if(!s.main.size && a.rocks[0]) s.main.add(a.rocks[0].rock.id);
   s.unitKey=(s.units[0].name||s.units[0].strat_name||s.units[0].lith||'')+'';
+  const first=a.rocks[0];      // the main mapped rock decides: loose sediment or bedrock
+  s.sed = first ? SEDIMENT.has(first.rock.id) : /alluv|gravel|unconsolidated|surficial|sand and/i.test(s.units[0].lith||'');
 }
 /* ---------- Why each find could be at a spot, and how to find it there ---------- */
 const TRAIT={
@@ -1505,6 +1650,7 @@ function huntTips(s,key,seen){
     if(TRAIT.heavy.has(key)) add('heavy',`It's heavy, so ${where} sorts it out of lighter sand. Dig on the inside of bends, behind boulders and in cracks in the bedrock, then pan or sieve the fine gravel.`,`It's heavy too, so pan the same spots along ${nm}.`);
     else if(TRAIT.hard.has(key)) add('hard',`It's hard enough to survive tumbling downstream, so walk the gravel bars of ${where} looking for rounded pieces. Wet them to bring out the color.`,`It also survives as rounded pebbles on the gravel bars of ${nm}.`);
   }
+  if(s.sed && (TRAIT.heavy.has(key)||TRAIT.hard.has(key))) add('sed',`In this sediment, the coarse layer at the bottom holds the most. Check cut banks first, then dig down to it and sieve.`,`Look for it in the same bottom gravel layer.`);
   if(s.mine && (TRAIT.ore.has(key)||TRAIT.skarn.has(key)||TRAIT.pocket.has(key))){
     const nm=s.mine.name?esc(s.mine.name):(s.mine.quarry?'the quarry':'the old mine');
     add('mine', s.mine.quarry
@@ -1519,6 +1665,11 @@ function huntTips(s,key,seen){
   if(s.hotId==='pegmatite' && TRAIT.pocket.has(key)) add('pocket',`In pegmatite the best crystals grow in pockets. Look for open cavities or clay-filled holes, and for crystal pieces in the soil just below outcrops.`,`Like the others, it grows best in pegmatite pockets.`);
   if(TRAIT.cavity.has(key) && host.some(id=>['basalt','rhyolite','tuff','scoria','andesite','limestone','dolostone'].includes(id))) add('cavity',`It fills holes and cavities in the rock. Look for round nodules weathering out onto slopes and into washes.`,`It also fills cavities, so crack open nodules you find.`);
   if(TRAIT.layered.has(key) && host.some(id=>['shale','siltstone','limestone','sandstone','coal','tuff','evaporite'].includes(id))) add('layer',`It sits in the rock layers. Check eroding slopes and gullies after rain, and split loose slabs along their layers.`,`Look in the same layers and gullies.`);
+  if(s.mrds && s.mrds.comm.some(c=>COMMODITY_MIN[c]===key)){
+    const nm=esc(s.mrds.name), pr=/prospect|occurrence/i.test(s.mrds.status);
+    add('mrds:'+key, pr ? `Search around ${nm}: prospects leave small pits, trenches and piles of broken rock where diggers tested the ground.` : `Search the dumps around ${nm}: waste rock still holds pieces the miners didn't want.`, null);
+  }
+  if(s.fault && TRAIT.ore.has(key)) add('fault',`Walk along the fault${s.fault.name?` (${esc(s.fault.name)})`:''} and check crushed, rusty or white-veined rock.`,`Check the fault zone for it too.`);
   if(s.expo) add('expo',`The ${s.expo.what} ${s.expo.d<0.05?'here':`${fmtDist(s.expo.d)} away`} show${s.expo.what==='cliffs'?'':'s'} fresh rock. Check fallen blocks at the base instead of climbing.`,null);
   const t=TIPS[key];
   if(!out.length || out.every(x=>x.length<80)) out.push(t?`Other places it turns up: ${esc(t.find.charAt(0).toLowerCase()+t.find.slice(1))}`:'Look wherever its host rock is exposed: road cuts, washes and stream gravel.');
@@ -1526,9 +1677,10 @@ function huntTips(s,key,seen){
 }
 function findHtml(s,f,seen){
   const tip=TIPS[f.key];
+  if(!INFO[f.key]) INFO[f.key]={name:MINERAL_LABEL(f.key),tag:'Mineral or crystal',bars:0,why:[]};
   return `<div class="find" style="--lvl:${LIKE[f.bars].c}">
     <div class="fhead"><button type="button" class="lchip" data-tips="${esc(f.key)}">${esc(MINERAL_LABEL(f.key))}</button><span style="color:${LIKE[f.bars].c}">${LIKE[f.bars].t}</span></div>
-    <p><b>Why it could be here.</b> ${whyText(f.key,f.whys)}</p>
+    <p><b>Why it could be here.</b> ${f.src?esc(f.src):whyText(f.key,f.whys)}</p>
     <p><b>Where to look.</b> ${huntTips(s,f.key,seen).join(' ')}</p>
     ${tip?`<p><b>How to spot it.</b> ${esc(spotText(tip.id))}</p>`:''}
   </div>`;
@@ -1545,14 +1697,15 @@ function groundText(u){
 }
 function rockName(id){ const r=ROCKS.find(x=>x.id===id); return r?r.name.split(' / ')[0].replace(/ \(.*\)/,'').toLowerCase():id; }
 
-function scoreArea(samples,spacing,feats){
+function scoreArea(samples,spacing,feats,ex){
+  ex=ex||{};
   samples.forEach(scoreSample);
   // contacts between different rock units
   samples.forEach(s=>{
     s.contact=0;
     for(const o of samples){
       if(o===s || Math.hypot(o.x-s.x,o.y-s.y)>spacing*1.3) continue;
-      if(o.unitKey===s.unitKey || [...o.main].some(id=>s.main.has(id))) continue;
+      if(o.unitKey===s.unitKey || [...o.main].some(id=>s.main.has(id)) || s.sed || o.sed) continue;   // contacts are between bedrock types
       const ign=[...s.main,...o.main].find(id=>INTRUSIVE.has(id)), carb=[...s.main,...o.main].find(id=>CARBONATE.has(id));
       if(ign&&carb&&s.contact<1.2){ s.contact=1.2; s.contactInfo={kind:'skarn',a:rockName(ign),b:rockName(carb)}; s.contactTxt=`Near where ${rockName(ign)} meets ${rockName(carb)}. Contacts like this can form skarn, with garnet, epidote and ore minerals`; }
       else if(s.contact<.45){
@@ -1577,7 +1730,8 @@ function scoreArea(samples,spacing,feats){
     if(mn&&mn.d<1.2){
       s.geo+=mn.d<0.4?1:.6;
       const t=mn.f.tags, q=t.landuse==='quarry';
-      s.reasons.push(`${q?'A quarry':'An old mine'}${mn.f.name?` (${mn.f.name})`:''} is ${fmtDist(mn.d)} away. ${q?'Quarries are usually private and may be active, so ask before entering.':'Dumps and tailings often hold specimens. Stay out of shafts and tunnels, and get permission first.'}`);
+      s.mineReason=`${q?'A quarry':'An old mine'}${mn.f.name?` (${mn.f.name})`:''} is ${fmtDist(mn.d)} away. ${q?'Quarries are usually private and may be active, so ask before entering.':'Dumps and tailings often hold specimens. Stay out of shafts and tunnels, and get permission first.'}`;
+      s.reasons.push(s.mineReason);
       s.mine={d:mn.d,name:mn.f.name,quarry:q};
     }
     const rk=nearest(s.x,s.y,feats.rock);
@@ -1588,9 +1742,166 @@ function scoreArea(samples,spacing,feats){
       s.reasons.push(`${n==='cliff'?'Cliffs':n==='scree'?'A scree slope':'Exposed rock'} ${rk.d<0.05?'right here':`${fmtDist(rk.d)} away`}, so bedrock shows instead of hiding under soil`);
     }
   });
+  scoreTerrain(samples,spacing,ex.elev);
+  scoreStructure(samples,feats,ex);
+  scoreSediment(samples,spacing);
   samples.forEach(s=>{
+    s.findInfo=s.findInfo.slice(0,5); s.finds=s.findInfo.map(f=>f.key);
     s.score=s.value+s.hot+s.contact+s.geo;
-    s.bars=s.score>=4.2?5:s.score>=3.2?4:s.score>=2.3?3:s.score>=1.1?2:1;
+    s.bars=s.score>=4.6?5:s.score>=3.5?4:s.score>=2.5?3:s.score>=1.3?2:1;
+  });
+}
+
+/* ---------- Topography: elevation, slope and position (ridge, slope, valley floor, flat) ---------- */
+const SEDIMENT=new Set(['alluvium','till','eolian','beach']);
+const VOLCANIC=new Set(['basalt','rhyolite','tuff','obsidian','scoria','andesite','dacite']);
+const ft=m=>Math.round(m*3.28084);
+function scoreTerrain(samples,spacing,E){
+  samples.forEach(s=>{
+  });
+  if(!E) return;
+  samples.forEach(s=>{ const e=E[s.i]; s.elev=Number.isFinite(e)?e:null; });
+  const els=samples.map(s=>s.elev).filter(v=>v!=null); if(els.length<3) return;
+  const relief=Math.max(...els)-Math.min(...els), t=Math.max(10,relief*0.06);
+  samples.forEach(s=>{
+    if(s.elev==null) return;
+    const nb=samples.filter(o=>o!==s&&o.elev!=null&&Math.hypot(o.x-s.x,o.y-s.y)<=spacing*1.3); if(!nb.length) return;
+    s.tpi=s.elev-nb.reduce((a,o)=>a+o.elev,0)/nb.length;
+    s.slope=Math.max(...nb.map(o=>Math.abs(o.elev-s.elev)/(Math.hypot(o.x-s.x,o.y-s.y)*1000)));
+    s.terrain=s.tpi<-t?'valley':s.tpi>t?'ridge':s.slope>0.18?'steep':s.slope<0.03?'flat':'slope';
+    if(s.terrain==='valley' && (s.sed||s.stream)){ s.geo+=.35; s.reasons.push('Low ground where runoff and gravel collect, so it samples every rock upslope'); }
+    else if(s.terrain==='ridge' && !s.sed){ s.geo+=.2; s.reasons.push('On a ridge or high point. Hard rock like quartz veins and quartzite stands out here, and bedrock is close to the surface'); }
+    else if(s.terrain==='steep' && !s.sed){ s.geo+=.3; s.reasons.push('Steep ground keeps the soil thin, so bedrock and loose pieces (float) show at the surface'); }
+    else if(s.terrain==='flat' && s.main.has('evaporite')){ s.geo+=.3; s.reasons.push('A flat basin floor where water pools and evaporates. Selenite and desert roses form just under the crust'); }
+  });
+}
+
+/* ---------- Faults, dikes, volcanic features and documented mines ---------- */
+function scoreStructure(samples,feats,ex){
+  const faults=(ex.faults||[]).filter(f=>f.kind==='fault'), dikes=(ex.faults||[]).filter(f=>f.kind!=='fault');
+  samples.forEach(s=>{
+    const fa=nearest(s.x,s.y,faults);
+    if(fa&&fa.d<0.6){
+      const ore=s.findInfo.some(f=>TRAIT.ore.has(f.key));
+      s.geo+=.55+(ore?.25:0); s.fault={d:fa.d,name:fa.f.name,type:fa.f.type};
+      s.reasons.push(`${fa.f.name?`The ${fa.f.name}`:`A mapped ${/fault/i.test(fa.f.type)?fa.f.type.toLowerCase():'fault'}`} ${fa.d<0.05?'crosses here':`runs ${fmtDist(fa.d)} away`}. Faults crack the rock and let mineral-rich water through, so quartz, calcite and ore veins often follow them`);
+    }
+    const dk=nearest(s.x,s.y,dikes);
+    if(dk&&dk.d<0.4){
+      s.geo+=.4; s.dike={d:dk.d,kind:dk.f.kind,name:dk.f.name};
+      s.reasons.push(dk.f.kind==='vein'
+        ? `A mapped vein ${dk.d<0.05?'crosses here':`runs ${fmtDist(dk.d)} away`}. Veins are where crystals and ore minerals grew in open cracks`
+        : `A dike (a wall of once-molten rock that filled a crack) ${dk.d<0.05?'crosses here':`runs ${fmtDist(dk.d)} away`}. Its baked edges can hold veins and unusual minerals`);
+    }
+    if(feats&&feats.volcanic.length){
+      const hs=nearest(s.x,s.y,feats.volcanic.filter(v=>v.kind!=='volcano'));
+      if(hs&&hs.d<2){ s.geo+=.5; s.volc={hot:true};
+        s.reasons.push(`${hs.f.name||(hs.f.kind==='geyser'?'A geyser':'A hot spring')} is ${fmtDist(hs.d)} away. Hot mineral water leaves opal, chalcedony, sinter and travertine around old and active vents`); }
+      const vo=nearest(s.x,s.y,feats.volcanic.filter(v=>v.kind==='volcano'));
+      if(vo&&vo.d<8){ s.geo+=.15; s.volc={...(s.volc||{}),volcano:vo.f.name||'a volcano'};
+        s.reasons.push(`${vo.f.name||'A volcano'} is ${fmtDist(vo.d)} away. Its lava flows and ash beds can hold agate, obsidian, opal and thundereggs`); }
+    }
+    const age=+s.units[0].b_int_age;
+    if([...s.main].some(id=>VOLCANIC.has(id)) && Number.isFinite(age) && age<5){
+      s.geo+=.15; s.volc={...(s.volc||{}),young:age};
+      s.reasons.push(`Young volcanic rock, about ${fmtAge(age)} old. Gas holes, glass and ash beds are still fresh here, so agate, obsidian and opal survive`);
+    }
+    const mr=nearest(s.x,s.y,ex.mrds||[]);
+    if(mr&&mr.d<1.5){
+      const m=mr.f, prod=PRODUCER(m.status), close=mr.d<0.5;
+      s.geo+=prod?(close?1:.6):(close?.5:.3);
+      s.mrds={...m,d:mr.d};
+      const what=/past/i.test(m.status)?'a past-producing mine':prod?'a producing mine':/prospect/i.test(m.status)?'a prospect':/occurrence/i.test(m.status)?'a mineral occurrence':'a mineral site';
+      s.reasons.push(`USGS records ${what}, ${m.name}, ${mr.d<0.05?'right here':`${fmtDist(mr.d)} away`}${m.comm.length?`, for ${m.comm.slice(0,4).join(', ')}`:''}`);
+      if(s.mineReason) s.reasons=s.reasons.filter(r=>r!==s.mineReason);   // same mine, don't say it twice
+      const add=[];
+      m.comm.forEach(c=>{ const k=COMMODITY_MIN[c]; if(k&&!add.includes(k)) add.push(k); });
+      add.slice(0,2).reverse().forEach(k=>{
+        s.findInfo=s.findInfo.filter(f=>f.key!==k);
+        s.findInfo.unshift({key:k,bars:close?4:3,whys:[],src:`USGS mineral records list ${c2(m.comm,k)} at ${m.name}, ${mr.d<0.05?'right here':`${fmtDist(mr.d)} away`}, so it has been found in this ground before.`});
+        s.value+=prize(k)*.35;
+      });
+    }
+  });
+}
+function c2(comm,key){ const c=Object.keys(COMMODITY_MIN).find(k=>COMMODITY_MIN[k]===key&&comm.includes(k)); return c||MINERAL_LABEL(key).toLowerCase(); }
+
+/* ---------- Under the sediment: which stones wash down into gravel from bedrock upslope ---------- */
+function scoreSediment(samples,spacing){
+  const reach=Math.max(3,spacing*2.2);
+  samples.forEach(s=>{
+    if(!s.sed) return;
+    const cand=new Map();
+    samples.forEach(o=>{
+      if(o.sed||o===s) return;
+      const d=Math.hypot(o.x-s.x,o.y-s.y); if(d>reach) return;
+      if(s.elev!=null&&o.elev!=null&&o.elev<s.elev+10) return;     // has to be uphill
+      o.findInfo.forEach(f=>{
+        if(f.src||f.bars<2||!(TRAIT.hard.has(f.key)||TRAIT.heavy.has(f.key))) return;
+        const sc=prize(f.key)*f.bars/(1+d), prev=cand.get(f.key);
+        if(!prev||sc>prev.sc) cand.set(f.key,{o,f,d,sc});
+      });
+    });
+    const top=[...cand.values()].sort((a,b)=>b.sc-a.sc).slice(0,3);
+    if(!top.length) return;
+    s.sources=top;
+    s.geo+=Math.min(1.1,top.reduce((a,x)=>a+x.sc,0)*.25);
+    const o=top[0].o, rock=rockName([...o.main][0]), dir=dirName((Math.atan2(o.x-s.x,o.y-s.y)*180/Math.PI+360)%360);
+    const rise=(s.elev!=null&&o.elev!=null)?`, about ${ft(o.elev-s.elev).toLocaleString()} ft higher`:'';
+    s.reasons.push(`This is loose sediment, so it collects stones washed down from bedrock upslope, like the ${rock} ${fmtDist(top[0].d)} ${dir}${rise}. Look for ${top.map(x=>MINERAL_LABEL(x.f.key).toLowerCase()).join(', ')} in the gravel`);
+    top.slice().reverse().forEach(x=>{
+      if(s.findInfo.some(f=>f.key===x.f.key&&f.src)) return;
+      s.findInfo=s.findInfo.filter(f=>f.key!==x.f.key);
+      const r=rockName([...x.o.main][0]), dr=dirName((Math.atan2(x.o.x-s.x,x.o.y-s.y)*180/Math.PI+360)%360);
+      const up=(s.elev!=null&&x.o.elev!=null)?` and ${ft(x.o.elev-s.elev).toLocaleString()} ft higher`:'';
+      s.findInfo.unshift({key:x.f.key,bars:Math.max(2,x.f.bars-1),whys:[],float:true,
+        src:`It weathers out of the ${r} ${fmtDist(x.d)} ${dr}${up}, then washes down into this sediment. ${TRAIT.heavy.has(x.f.key)?'It\'s heavy, so it sinks to the bottom of the gravel, just above bedrock.':'It\'s hard, so it survives the trip as rounded pebbles.'}`});
+    });
+  });
+}
+
+/* ---------- Field guide: how to recognize the features at a spot ---------- */
+function fieldGuide(s){
+  const g=[], host=new Set(s.a.allRocks.map(f=>f.rock.id));
+  if(s.stream||s.terrain==='valley'||s.sed) g.push(['Spotting a wash or old channel','A wash is a flat strip of sand and gravel with little plant growth down the middle, steep cut banks on the outside of bends, and lines of flood debris (twigs, trash) caught on brush. The richest gravel sits at the upstream heads of gravel bars, behind big boulders, and wherever bedrock crosses the channel and slows the water. Never camp or dig in a wash when storms are possible: flash floods come with no warning.']);
+  if(s.sed) g.push(['Finding stones under the sediment','Heavy stones work their way down through loose gravel, so the best layer is the lowest one, right on bedrock or on a hard clay layer (false bedrock). Cut banks show these layers without digging: look for a band of coarse, rusty gravel or black sand near the bottom. Dig into cracks in exposed bedrock, then sieve and pan what you scrape out. On the surface, check the gravel lag that wind and rain leave behind on flats, where hard stones like agate and jasper are concentrated.']);
+  if(s.mine||s.mrds) g.push(['Recognizing old mine workings','Look for flat-topped piles of broken rock (dumps), often rusty, white or oddly colored and with no plants on them; benches or old roads that end at a hillside; collapsed openings; and rusted metal, rails or timbers. Old USGS topographic maps mark mines with crossed picks and prospects with an X. Search the dumps, not the openings: old shafts and tunnels have bad air and collapse without warning. Many old mines are still on active claims or private land, so check first.']);
+  if(s.fault) g.push(['Recognizing a fault','Faults show up as a straight notch, gully or valley cutting across the land; a line of springs or greener plants; rock that suddenly changes type or color; crushed, broken rock (breccia); and polished, scratched surfaces (slickensides). Mineral veins often follow the fault, so look for white quartz or calcite and rusty, stained rock along it.']);
+  if(s.dike) g.push(['Spotting a dike or vein','A dike or vein looks like a wall or stripe of different rock cutting across the layers around it, often standing out as a rib or showing up as a darker or lighter band. Check both edges: that is where the baked contact zone and any crystals are.']);
+  if(s.hotId==='pegmatite'||host.has('pegmatite')) g.push(['Spotting pegmatite','Pegmatite is light-colored rock with crystals bigger than your thumb, often glittering with big mica flakes. It forms veins and pods that stand out as ribs in granite. Pockets with the best crystals often sit in the middle of the body, and are sometimes marked by clay, smoky quartz or big feldspar crystals.']);
+  if(s.contactInfo) g.push(['Finding the contact','Walk across the boundary between the two rock types: color, texture and grain size change suddenly. The contact zone itself is often harder, heavier and more colorful than either rock, with garnet, epidote and rusty minerals where it was baked.']);
+  if([...host].some(id=>VOLCANIC.has(id))||s.volc) g.push(['Reading volcanic ground','Lava flows show gas holes (vesicles), ropy or broken tops, and columns. Ash beds look like soft, light, chalky sandstone, and nodules, geodes and thundereggs weather out of them onto the slopes below. Shiny black or brown glass means obsidian. Agate and opal fill the gas holes and cracks.']);
+  if(s.volc&&s.volc.hot) g.push(['Around hot springs','Old hot spring vents leave white to cream crusts of sinter or travertine, and opal or chalcedony in cracks. Stay on firm ground near active springs: crusts can be thin over scalding water, and most are protected.']);
+  if(!s.sed&&(s.terrain==='steep'||s.terrain==='ridge'||s.expo)) g.push(['Following float uphill','Loose pieces on a slope (float) came from somewhere above. If you find a good piece, walk uphill and keep checking: where the float stops, the source is just above. Fresh breaks on fallen blocks at the base of cliffs show the rock best.']);
+  return g;
+}
+function spotLinks(s){
+  const ll=`${s.lat.toFixed(5)},${s.lng.toFixed(5)}`;
+  return `<div class="spotlinks">
+    <a href="https://www.google.com/maps/@?api=1&map_action=map&center=${ll}&zoom=17&basemap=satellite" target="_blank" rel="noopener">Satellite view</a>
+    <a href="https://ngmdb.usgs.gov/topoview/viewer/#15/${s.lat.toFixed(4)}/${s.lng.toFixed(4)}" target="_blank" rel="noopener">Old topo maps (mines marked)</a>
+    <a href="https://ngmdb.usgs.gov/mapview/?center=${s.lng.toFixed(4)},${s.lat.toFixed(4)}&zoom=14" target="_blank" rel="noopener">Geologic map</a>
+    ${s.mrds&&s.mrds.url?`<a href="${esc(s.mrds.url)}" target="_blank" rel="noopener">USGS record: ${esc(s.mrds.name)}</a>`:''}
+  </div>`;
+}
+const TERRAIN_TXT={valley:'Valley floor or wash',ridge:'Ridge or high point',steep:'Steep slope',slope:'Hillside',flat:'Flat ground'};
+function terrainText(s){
+  const f=s.fine, kind=f?f.kind:s.terrain, elev=f?f.elev:s.elev;
+  if(!kind&&elev==null) return '';
+  const slope=f?f.slope:s.slope;
+  return [kind?TERRAIN_TXT[kind]:null, elev!=null?`${ft(elev).toLocaleString()} ft`:null, slope!=null?`${Math.round(slope*100)}% grade`:null].filter(Boolean).join(', ');
+}
+/* Finer terrain right around the best candidates: 6 points 150 m out */
+async function fineTerrain(cands){
+  const pts=[];
+  cands.forEach(s=>{ pts.push({lat:s.lat,lng:s.lng}); for(let k=0;k<6;k++){ const [la,lo]=offset(s.lat,s.lng,0.15,k*60); pts.push({lat:la,lng:lo}); } });
+  const E=await fetchElevations(pts,6000);
+  cands.forEach((s,ci)=>{
+    const c=E[ci*7], ring=E.slice(ci*7+1,ci*7+7).filter(v=>v!=null);
+    if(c==null||ring.length<4) return;
+    const mean=ring.reduce((a,v)=>a+v,0)/ring.length, tpi=c-mean, slope=Math.max(...ring.map(v=>Math.abs(v-c)))/150;
+    s.fine={elev:c,tpi,slope,kind:tpi<-3?'valley':tpi>3?'ridge':slope>0.25?'steep':slope<0.04?'flat':'slope'};
+    if(s.elev==null) s.elev=c;
   });
 }
 
@@ -1629,7 +1940,7 @@ function parkVerdict(t){
 const PARK_W={no:.3,check:.9,ok:1.05,none:1};
 
 /* ---------- Loading animation while a hunt runs ---------- */
-const STAGES=['Reading the rock map','Checking streams, old mines and exposed rock','Checking parks and reserves','Ranking the best spots'];
+const STAGES=['Reading the rock map','Checking terrain, faults, streams and mine records','Checking parks and close-up terrain','Ranking the best spots'];
 const GEM_SVG=`<svg viewBox="0 0 64 64" aria-hidden="true"><g stroke="#1e2622" stroke-width="2.4" stroke-linejoin="round">
   <path d="M18 10h28l12 14-26 32L6 24z" fill="#e3a72f"/>
   <path d="M6 24h52M18 10l6 14 8-14 8 14 6-14M24 24l8 32 8-32" fill="none"/>
@@ -1689,6 +2000,9 @@ async function huntArea(){
 async function huntSteps(run,pts,spacing,lat,lng,rKm){
   const head=`<div class="hunttop"><h2>Best spots to hunt</h2></div><div class="place-sub">Within ${fmtMi(AREA.radiusMi)} of ${esc(pinLabel())}</div>`;
   const featsP=fetchFeatures(lat,lng,rKm).catch(()=>null);
+  const elevP=fetchElevations(pts).catch(()=>null);
+  const faultsP=fetchFaults(lat,lng,rKm).catch(()=>null);
+  const mrdsP=fetchMRDS(lat,lng,rKm).catch(()=>null);
 
   const samples=[]; let idx=0, done=0, failed=0;
   const worker=async()=>{ while(idx<pts.length){ const p=pts[idx++];
@@ -1706,18 +2020,21 @@ async function huntSteps(run,pts,spacing,lat,lng,rKm){
       +'<button type="button" class="tipsbtn huntgo" data-hunt="edit" style="margin-top:1rem">Change the area</button>');
     return;
   }
-  loaderUpdate(1,'From OpenStreetMap',75);
-  const feats=await featsP;
+  loaderUpdate(1,'Elevation, fault maps, USGS mine records and OpenStreetMap',75);
+  const [feats,elev,faults,mrds]=await Promise.all([featsP,elevP,faultsP,mrdsP]);
   if(run!==AREA.run) return;
-  scoreArea(samples,spacing,feats);
+  scoreArea(samples,spacing,feats,{elev,faults,mrds});
   samples.forEach(s=>s.adj=s.score);
 
   // Pick spots, then check parks; repeat if a banned spot dropped out
   loaderUpdate(2,'So you don\'t end up somewhere collecting is banned',85);
   let parksOk=!!feats;                 // if OpenStreetMap just timed out, don't wait on it again
   const cands=pickSpots(samples,rKm,8);
-  if(cands.length && feats){
-    try{ await checkParks(cands); }catch(e){ parksOk=false; }
+  if(cands.length){
+    await Promise.all([
+      feats ? checkParks(cands).catch(()=>{ parksOk=false; }) : null,
+      elev ? fineTerrain(cands).catch(()=>{}) : null,
+    ]);
     if(run!==AREA.run) return;
     cands.forEach(s=>{ s.adj=s.score*PARK_W[s.park?s.park.level:'none']; });
   }
@@ -1733,7 +2050,16 @@ async function huntSteps(run,pts,spacing,lat,lng,rKm){
   samples.forEach(s=>s.finds.forEach((k,i)=>best.set(k,(best.get(k)||0)+s.bars*(4-i))));
   const finds=[...best.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k])=>k);
 
-  AREA.result={spots,samples,rocks,finds,feats:!!feats,parksOk,failed,checked:pts.length,radiusMi:AREA.radiusMi};
+  // Terrain, faults, documented sites and volcanic features in the whole circle
+  const els=samples.map(s=>s.elev).filter(v=>v!=null);
+  const terrain=els.length?{min:Math.min(...els),max:Math.max(...els)}:null;
+  const inCircle=f=>{ const n=nearest(0,0,[f]); return n&&n.d<=rKm; };   // any part of the line or point inside
+  const faultsIn=(faults||[]).filter(inCircle);
+  const sites=(mrds||[]).filter(inCircle).map(m=>({...m,km:distKm(lat,lng,m.lat,m.lng)}))
+    .sort((a,b)=>(PRODUCER(b.status)-PRODUCER(a.status))||a.km-b.km);
+  const volcanic=feats?feats.volcanic:[];
+  AREA.result={spots,samples,rocks,finds,feats:!!feats,parksOk,failed,checked:pts.length,radiusMi:AREA.radiusMi,
+    terrain,faults:faultsIn,sites,volcanic,ok:{elev:!!elev,faults:!!faults,mrds:!!mrds}};
   drawHunt(AREA.result);
   renderHunt(AREA.result);
   nameSpots(run);
@@ -1741,6 +2067,16 @@ async function huntSteps(run,pts,spacing,lat,lng,rKm){
 
 function drawHunt(res){
   clearHuntMarks();
+  res.faults.forEach(f=>{
+    L.polyline(f.ll,{huntMark:true,color:f.kind==='fault'?'#c0392b':'#7d3c98',weight:2.5,dashArray:f.kind==='fault'?'7 5':'2 5',opacity:.9})
+      .bindTooltip(esc(f.name||(f.kind==='fault'?(f.type||'Fault'):f.kind==='vein'?'Vein':'Dike'))).addTo(areaLayer);
+  });
+  res.sites.forEach(m=>{
+    L.marker([m.lat,m.lng],{huntMark:true,zIndexOffset:200,icon:L.divIcon({className:'',html:`<div class="mrdspin${PRODUCER(m.status)?' prod':''}"></div>`,iconSize:[14,14],iconAnchor:[7,7]})})
+      .bindTooltip(`<b>${esc(m.name)}</b><br>${esc(m.status||'Mineral site')}${m.comm.length?`<br>${esc(m.comm.slice(0,5).join(', '))}`:''}`)
+      .bindPopup(`<b>${esc(m.name)}</b><br>${esc(m.status||'Mineral site')}${m.comm.length?`<br>${esc(m.comm.join(', '))}`:''}${m.url?`<br><a href="${esc(m.url)}" target="_blank" rel="noopener">USGS record</a>`:''}`)
+      .addTo(areaLayer);
+  });
   const css=getComputedStyle(document.documentElement);
   res.samples.forEach(s=>{
     L.circleMarker([s.lat,s.lng],{huntMark:true,radius:3+s.bars*.8,weight:0,fillColor:css.getPropertyValue('--l'+s.bars).trim()||'#2f6b4f',fillOpacity:.6})
@@ -1767,8 +2103,10 @@ function renderHunt(res){
         <h4 class="nm">${esc(s.unitKey||'Mapped rock unit')}</h4>
         ${meter(s.bars)}
         ${groundText(s.units[0])?`<p class="ground"><b>The ground:</b> ${esc(groundText(s.units[0]))}</p>`:''}
-        ${s.reasons.length?`<div class="sub">Why this spot</div><ul class="where reasons">${s.reasons.slice(0,4).map(r=>`<li>${esc(/[.!?]$/.test(r)?r:r+'.')}</li>`).join('')}</ul>`:''}
+        ${terrainText(s)?`<p class="ground"><b>Terrain:</b> ${esc(terrainText(s))}</p>`:''}
+        ${s.reasons.length?`<div class="sub">Why this spot</div><ul class="where reasons">${s.reasons.slice(0,6).map(r=>`<li>${esc(/[.!?]$/.test(r)?r:r+'.')}</li>`).join('')}</ul>`:''}
         ${s.findInfo.length?`<details class="finddet"${i===0?' open':''}><summary>What to look for here (${s.findInfo.map(f=>esc(MINERAL_LABEL(f.key))).join(', ')})</summary>${(seen=>s.findInfo.map(f=>findHtml(s,f,seen)).join(''))(new Set())}</details>`:''}
+        ${(g=>g.length?`<details class="finddet"><summary>How to recognize what's here</summary>${g.map(([t,x])=>`<div class="find guide"><b>${esc(t)}.</b> ${esc(x)}</div>`).join('')}${spotLinks(s)}</details>`:`${spotLinks(s)}`)(fieldGuide(s))}
         ${s.park&&s.park.text?`<p class="park ${s.park.level}">${esc(s.park.text)}</p>`:''}
         <div class="actions">
           <button type="button" class="tipsbtn" data-hunt="spot" data-i="${i}">See this spot</button>
@@ -1780,13 +2118,24 @@ function renderHunt(res){
   const rocks=res.rocks.length?`<h3>What's in this circle</h3><div class="shares">${res.rocks.map(x=>`<div class="share"><span>${esc(x.rock.name)}</span><i style="width:${x.pct}%"></i><b>${x.pct}%</b></div>`).join('')}</div>`:'';
   const finds=res.finds.length?`<h4 style="font:600 1.05rem var(--cond);margin:1rem 0 .4rem;color:var(--muted)">Best finds in the area</h4><div class="links-chips">${res.finds.map(k=>`<button type="button" class="lchip" data-tips="${esc(k)}">${esc(MINERAL_LABEL(k))}</button>`).join('')}</div>`:'';
   res.finds.forEach(k=>{ if(!INFO[k]) INFO[k]={name:MINERAL_LABEL(k),tag:'Mineral or crystal',bars:0,why:[]}; });
-  setPanel(head+(res.spots.length?'<h3>Top spots</h3>':'')+list+rocks+finds+`
-    <div class="note"><p><b>How this works.</b> Rock Finder read the geologic map at ${res.checked} spots in the circle. Each spot gets points for the gems and minerals its rocks are known to hold, for gem-friendly rocks like pegmatite and basalt, for edges where two rock types meet${res.feats?', and for nearby streams, old mines and exposed rock from OpenStreetMap':''}. It shows where the odds are best, not confirmed finds.</p>
-    ${res.feats?'':'<p class="small muted">Stream and mine data didn\'t load, so the ranking uses geology only.</p>'}
+  const T=res.terrain;
+  const terr=T?`<p class="small"><b>Terrain:</b> ${ft(T.min).toLocaleString()} to ${ft(T.max).toLocaleString()} ft, ${ft(T.max-T.min).toLocaleString()} ft of relief. ${T.max-T.min>300?'Rugged ground: expect exposed bedrock and float on the slopes.':T.max-T.min>60?'Rolling ground: check slopes and drainages.':'Mostly flat: look in washes, cut banks and gravel.'}</p>`:'';
+  const fn=[...new Set(res.faults.filter(f=>f.kind==='fault').map(f=>f.name).filter(Boolean))];
+  const nF=res.faults.filter(f=>f.kind==='fault').length, nD=res.faults.length-nF;
+  const flt=res.faults.length?`<p class="small"><b>Faults and dikes:</b> ${nF?`${nF} mapped fault ${nF===1?'segment':'segments'}${fn.length?` (${esc(fn.slice(0,3).join(', '))})`:''}`:''}${nF&&nD?' and ':''}${nD?`${nD} ${nD===1?'dike or vein':'dikes or veins'}`:''} cross the circle, shown as dashed lines on the map. Veins and mineralized rock often follow them.</p>`
+    : res.ok.faults?'<p class="small"><b>Faults:</b> none mapped in this circle.</p>':'';
+  const vol=res.volcanic.length?`<p class="small"><b>Volcanic features nearby:</b> ${esc(res.volcanic.slice(0,4).map(v=>v.name||(v.kind==='volcano'?'a volcano':v.kind==='geyser'?'a geyser':'a hot spring')).join(', '))}.</p>`:'';
+  const sites=res.sites.length?`<h4 class="sumh">Documented mines and prospects (${res.sites.length})</h4><ul class="where sites">${res.sites.slice(0,6).map(m=>`<li><b>${m.url?`<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.name)}</a>`:esc(m.name)}</b> <span class="muted">${esc(m.status||'site')}, ${fmtDist(m.km)} ${dirName(bearing(AREA.pin.lat,AREA.pin.lng,m.lat,m.lng))}</span>${m.comm.length?`<br>${esc(m.comm.slice(0,5).join(', '))}`:''}</li>`).join('')}</ul><p class="small muted">From the USGS Mineral Resources Data System. Records are old: many sites are now private, claimed or reclaimed.</p>`
+    : res.ok.mrds?'<p class="small"><b>Documented mines:</b> none in the USGS records for this circle.</p>':'';
+  const land=(terr||flt||vol||sites)?`<h3>The lay of the land</h3>${terr}${flt}${vol}${sites}`:'';
+  const missing=[!res.feats&&'streams and mines from OpenStreetMap',!res.ok.elev&&'elevation',!res.ok.faults&&'fault maps',!res.ok.mrds&&'USGS mine records'].filter(Boolean);
+  setPanel(head+(res.spots.length?'<h3>Top spots</h3>':'')+list+rocks+finds+land+`
+    <div class="note"><p><b>How this works.</b> Rock Finder read the geologic map at ${res.checked} spots in the circle. Each spot gets points for the gems and minerals its rocks are known to hold, for gem-friendly rocks like pegmatite and basalt, for edges where two rock types meet, for faults, dikes and volcanic features, for documented mines and prospects, for terrain (valley floors collect gravel, steep slopes expose bedrock), and for stones that wash down into sediment from bedrock uphill. It shows where the odds are best, not confirmed finds.</p>
+    ${missing.length?`<p class="small muted">Some data didn't load (${missing.join(', ')}), so the ranking leaves it out.</p>`:''}
     ${res.parksOk?'':'<p class="small muted">The park check didn\'t load, so check land status yourself.</p>'}
     <p><b>Before you go,</b> check who owns the land. Collecting is banned in national parks and needs permission on private land. BLM and national forest maps show public land.</p>
     ${res.failed?`<p class="small muted">${res.failed} spots didn't load and were skipped.</p>`:''}</div>
-    <p class="credits">Geology from <a href="https://macrostrat.org" target="_blank" rel="noopener">Macrostrat</a> (CC-BY 4.0). Streams, mines and parks from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</p>`);
+    <p class="credits">Geology from <a href="https://macrostrat.org" target="_blank" rel="noopener">Macrostrat</a> (CC-BY 4.0). Streams, mines and parks from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Mine records from the <a href="https://mrdata.usgs.gov/mrds/" target="_blank" rel="noopener">USGS MRDS</a>. Elevation from the Copernicus DEM via <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>.</p>`);
   document.getElementById('panel').scrollTop=0;
 }
 async function nameSpots(run){
