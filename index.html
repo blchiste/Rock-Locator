@@ -215,6 +215,31 @@
   .radius input{width:100%;accent-color:var(--juniper);margin:.5rem 0 .1rem;height:28px}
   .radius .ticks{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted)}
   .hunting .legend .you-row{display:none}
+  /* Hunt loading animation */
+  .hloader{display:flex;align-items:center;gap:1rem;background:var(--card);border-radius:8px;padding:1rem;margin:.9rem 0 .2rem}
+  .hloader b{display:block;font:700 1.3rem/1.15 var(--cond)}
+  .hloader span{display:block;font-size:.9rem;color:var(--muted);margin-top:.15rem}
+  .gemspin{position:relative;flex:none;width:58px;height:58px;perspective:200px}
+  .gemspin svg{width:100%;height:100%;animation:gemturn 2.2s ease-in-out infinite;transform-origin:50% 50%}
+  .gemspin::before,.gemspin::after{content:"";position:absolute;width:9px;height:9px;background:var(--blaze);clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%);animation:twinkle 1.6s ease-in-out infinite}
+  .gemspin::before{top:-2px;right:0}
+  .gemspin::after{bottom:4px;left:-4px;width:7px;height:7px;animation-delay:.8s}
+  @keyframes gemturn{0%{transform:rotateY(0) translateY(0)}50%{transform:rotateY(180deg) translateY(-4px)}100%{transform:rotateY(360deg) translateY(0)}}
+  @keyframes twinkle{0%,100%{opacity:0;transform:scale(.4)}50%{opacity:1;transform:scale(1)}}
+  .hloader+.progress{margin-top:.6rem}
+  .progress .bar i.live{background:linear-gradient(90deg,var(--juniper) 0 40%,#6aa88a 50%,var(--juniper) 60% 100%);background-size:200% 100%;animation:shimmer 1.4s linear infinite}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  .hstages{list-style:none;padding:0;margin:.9rem 0;display:grid;gap:.45rem;font-size:.95rem}
+  .hstages li{display:flex;align-items:center;gap:.6rem;color:var(--muted)}
+  .hstages li::before{content:"";flex:none;width:18px;height:18px;border-radius:50%;border:2px solid var(--line);box-sizing:border-box}
+  .hstages li.on{color:var(--ink);font-weight:600}
+  .hstages li.on::before{border-color:var(--line);border-top-color:var(--juniper);animation:spin .8s linear infinite}
+  .hstages li.done{color:var(--ink)}
+  .hstages li.done::before{background:var(--juniper) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3C/svg%3E") center/12px no-repeat;border-color:var(--juniper)}
+  .sweep{width:100%;height:100%;border-radius:50%;background:conic-gradient(from 0deg,rgba(227,167,47,0) 0deg,rgba(227,167,47,0) 270deg,rgba(227,167,47,.5) 360deg);animation:spin 2.6s linear infinite;pointer-events:none}
+  path.scanning{stroke-dasharray:14 10;animation:march 1s linear infinite}
+  @keyframes march{to{stroke-dashoffset:-24}}
+  @media (prefers-reduced-motion:reduce){.gemspin svg,.sweep,path.scanning,.progress .bar i.live{animation-duration:6s}.gemspin::before,.gemspin::after{animation:none;opacity:.8}}
   @media (max-width:400px){.mode button{padding:.35rem .62rem}}
   .huntgo{width:100%;padding:.8rem;font-size:1.05rem}
   .hunttop{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
@@ -1236,7 +1261,7 @@ function startArea(){
   if(!AREA.pin) mapNote(map.getZoom()>=MIN_PIN_ZOOM?'Tap the map to drop your pin':'Zoom in to where you want to hunt, then tap to drop a pin');
 }
 function clearArea(){
-  AREA.run++; areaLayer.clearLayers();
+  stopScan(); AREA.run++; areaLayer.clearLayers();
   AREA.pin=null; AREA.circle=null; AREA.result=null; AREA.place=null; backTo=null; showLegend(false);
 }
 async function areaSearch(q){
@@ -1270,7 +1295,7 @@ function areaTap(ll){
 }
 
 function placePin(lat,lng,label){
-  AREA.run++; AREA.result=null; backTo=null;
+  stopScan(); AREA.run++; AREA.result=null; backTo=null;
   AREA.pin={lat,lng}; AREA.place=label||null;
   areaLayer.clearLayers(); showLegend(false);
   if(marker){ map.removeLayer(marker); marker=null; }
@@ -1328,7 +1353,7 @@ document.getElementById('panel').addEventListener('change',e=>{
 document.getElementById('panel').addEventListener('click',e=>{
   const h=e.target.closest('[data-hunt]'); if(!h) return;
   if(h.dataset.hunt==='go') huntArea();
-  if(h.dataset.hunt==='edit'){ AREA.run++; AREA.result=null; backTo=null; clearHuntMarks(); renderAreaSetup(); map.fitBounds(AREA.circle.getBounds().pad(0.08)); }
+  if(h.dataset.hunt==='edit'){ stopScan(); AREA.run++; AREA.result=null; backTo=null; clearHuntMarks(); renderAreaSetup(); map.fitBounds(AREA.circle.getBounds().pad(0.08)); }
   if(h.dataset.hunt==='spot'){ const s=AREA.result&&AREA.result.spots[+h.dataset.i]; if(s) goToHit(s.lat,s.lng); }
 });
 function clearHuntMarks(){ areaLayer.eachLayer(l=>{ if(l.options&&l.options.huntMark) areaLayer.removeLayer(l); }); showLegend(false); }
@@ -1603,23 +1628,76 @@ function parkVerdict(t){
 }
 const PARK_W={no:.3,check:.9,ok:1.05,none:1};
 
+/* ---------- Loading animation while a hunt runs ---------- */
+const STAGES=['Reading the rock map','Checking streams, old mines and exposed rock','Checking parks and reserves','Ranking the best spots'];
+const GEM_SVG=`<svg viewBox="0 0 64 64" aria-hidden="true"><g stroke="#1e2622" stroke-width="2.4" stroke-linejoin="round">
+  <path d="M18 10h28l12 14-26 32L6 24z" fill="#e3a72f"/>
+  <path d="M6 24h52M18 10l6 14 8-14 8 14 6-14M24 24l8 32 8-32" fill="none"/>
+  <path d="M20 13l-9 10h12z" fill="#f4d58b" stroke="none"/></g></svg>`;
+function loaderHtml(head){
+  return head+`<div class="hloader" role="status" aria-live="polite">
+      <div class="gemspin">${GEM_SVG}</div>
+      <div><b id="hlTitle">${STAGES[0]}…</b><span id="hlDetail">Getting started</span></div>
+    </div>
+    <div class="progress"><div class="bar"><i id="hlBar" class="live" style="width:3%"></i></div></div>
+    <ol class="hstages">${STAGES.map((t,i)=>`<li id="hlS${i}"${i===0?' class="on"':''}>${t}</li>`).join('')}</ol>
+    <button type="button" class="back" data-hunt="edit">Cancel</button>`;
+}
+function loaderUpdate(stage,detail,pct){
+  const T=document.getElementById('hlTitle'); if(!T) return;
+  T.textContent=STAGES[stage]+'…';
+  document.getElementById('hlDetail').textContent=detail||'';
+  if(pct!=null) document.getElementById('hlBar').style.width=Math.round(pct)+'%';
+  STAGES.forEach((_,i)=>{ const li=document.getElementById('hlS'+i); if(li) li.className=i<stage?'done':i===stage?'on':''; });
+}
+/* Radar sweep inside the circle on the map */
+let scanTok=0, sweep=null;
+function sweepIcon(z){
+  const b=AREA.circle.getBounds(); if(z==null) z=map.getZoom();
+  const r=Math.max(12,(map.project(b.getNorthEast(),z).x-map.project(b.getSouthWest(),z).x)/2);
+  return L.divIcon({className:'',html:'<div class="sweep"></div>',iconSize:[2*r,2*r],iconAnchor:[r,r]});
+}
+function startScan(){
+  stopScan();
+  const tok=++scanTok;
+  const el=AREA.circle&&AREA.circle.getElement(); if(el) el.classList.add('scanning');
+  const z=map.getBoundsZoom(AREA.circle.getBounds().pad(0.05));   // the zoom the map is moving to
+  sweep=L.marker([AREA.pin.lat,AREA.pin.lng],{interactive:false,keyboard:false,zIndexOffset:-1000,icon:sweepIcon(z)}).addTo(map);
+  return tok;
+}
+function stopScan(tok){
+  if(tok!==undefined && tok!==scanTok) return;   // a newer hunt owns the animation
+  if(sweep){ map.removeLayer(sweep); sweep=null; }
+  const el=AREA.circle&&AREA.circle.getElement(); if(el) el.classList.remove('scanning');
+}
+map.on('zoomanim',e=>{ if(sweep&&AREA.circle) sweep.setIcon(sweepIcon(e.zoom)); });
+map.on('zoomend',()=>{ if(sweep&&AREA.circle) sweep.setIcon(sweepIcon()); });
+
 async function huntArea(){
   if(!AREA.pin) return;
   const run=++AREA.run, {lat,lng}=AREA.pin, rKm=AREA.radiusMi*1.609344;
   backTo=null; clearHuntMarks(); reqId++;
   const {pts,spacing}=hexPoints(lat,lng,rKm,48);
   const head=`<div class="hunttop"><h2>Best spots to hunt</h2></div><div class="place-sub">Within ${fmtMi(AREA.radiusMi)} of ${esc(pinLabel())}</div>`;
-  const prog=(n,t)=>`<div class="progress"><div class="bar"><i style="width:${Math.round(n/pts.length*100)}%"></i></div><span>${t}</span></div>`;
-  setPanel(head+prog(0,'Reading the geologic map…'));
+  setPanel(loaderHtml(head));
+  if(window.innerWidth<=820) window.scrollTo({top:0,behavior:'smooth'});   // keep the map and the loader both in view
   map.fitBounds(AREA.circle.getBounds().pad(0.05));
+  const tok=startScan();
+  try{ await huntSteps(run,pts,spacing,lat,lng,rKm); }
+  finally{ stopScan(tok); }
+}
+async function huntSteps(run,pts,spacing,lat,lng,rKm){
+  const head=`<div class="hunttop"><h2>Best spots to hunt</h2></div><div class="place-sub">Within ${fmtMi(AREA.radiusMi)} of ${esc(pinLabel())}</div>`;
   const featsP=fetchFeatures(lat,lng,rKm).catch(()=>null);
 
   const samples=[]; let idx=0, done=0, failed=0;
   const worker=async()=>{ while(idx<pts.length){ const p=pts[idx++];
-    try{ const units=await fetchUnits(p.lat,p.lng); if(run!==AREA.run) return; if(units.length) samples.push({...p,units,a:analyze(units)}); }
+    try{ const units=await fetchUnits(p.lat,p.lng); if(run!==AREA.run) return;
+      if(units.length){ samples.push({...p,units,a:analyze(units)});
+        L.circleMarker([p.lat,p.lng],{huntMark:true,interactive:false,radius:3.5,weight:1.5,color:'#fff',fillColor:'#1e2622',fillOpacity:.75}).addTo(areaLayer); } }
     catch(e){ failed++; }
     done++;
-    if(run===AREA.run && (done%4===0||done===pts.length)) setPanel(head+prog(done,`Checked the geology at ${done} of ${pts.length} spots`));
+    if(run===AREA.run) loaderUpdate(0,`Checked ${done} of ${pts.length} spots`,3+done/pts.length*67);
   }};
   await Promise.all([1,2,3,4,5,6,7,8].map(worker));
   if(run!==AREA.run) return;
@@ -1628,14 +1706,14 @@ async function huntArea(){
       +'<button type="button" class="tipsbtn huntgo" data-hunt="edit" style="margin-top:1rem">Change the area</button>');
     return;
   }
-  setPanel(head+prog(pts.length,'Checking streams, old mines and exposed rock…'));
+  loaderUpdate(1,'From OpenStreetMap',75);
   const feats=await featsP;
   if(run!==AREA.run) return;
   scoreArea(samples,spacing,feats);
   samples.forEach(s=>s.adj=s.score);
 
   // Pick spots, then check parks; repeat if a banned spot dropped out
-  setPanel(head+prog(pts.length,'Checking parks and reserves…'));
+  loaderUpdate(2,'So you don\'t end up somewhere collecting is banned',85);
   let parksOk=!!feats;                 // if OpenStreetMap just timed out, don't wait on it again
   const cands=pickSpots(samples,rKm,8);
   if(cands.length && feats){
@@ -1643,6 +1721,7 @@ async function huntArea(){
     if(run!==AREA.run) return;
     cands.forEach(s=>{ s.adj=s.score*PARK_W[s.park?s.park.level:'none']; });
   }
+  loaderUpdate(3,'Almost done',96);
   const spots=pickSpots(samples,rKm,5);
   spots.forEach(s=>{ s.km=distKm(lat,lng,s.lat,s.lng); s.dir=bearing(lat,lng,s.lat,s.lng); });
 
